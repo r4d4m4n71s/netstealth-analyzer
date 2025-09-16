@@ -15,6 +15,7 @@ Author: NetStealth Contributors
 License: MIT
 """
 
+from ._version import __version__
 from .core import NetStealthAnalyzer
 from .models import (
     AnalysisResult,
@@ -22,8 +23,6 @@ from .models import (
     NetworkHop,
     AnalysisSummary
 )
-
-__version__ = "0.1.0"
 __author__ = "NetStealth Contributors"
 __email__ = "contributors@netstealth.com"
 __description__ = "Advanced log analyzer for network stealth operations"
