@@ -18,9 +18,9 @@ License: MIT
 from .core import NetStealthAnalyzer
 from .models import (
     AnalysisResult,
-    SecurityIssue,
-    NetworkFlow,
-    ProxyChainStatus
+    CriticalIssue,
+    NetworkHop,
+    AnalysisSummary
 )
 
 __version__ = "0.1.0"
@@ -34,9 +34,9 @@ __all__ = [
     
     # Data models
     "AnalysisResult",
-    "SecurityIssue", 
-    "NetworkFlow",
-    "ProxyChainStatus",
+    "CriticalIssue", 
+    "NetworkHop",
+    "AnalysisSummary",
     
     # Metadata
     "__version__",

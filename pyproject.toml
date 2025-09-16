@@ -72,11 +72,11 @@ Issues = "https://github.com/netstealth/netstealth-analyzer/issues"
 Documentation = "https://netstealth-analyzer.readthedocs.io/"
 
 [project.scripts]
-netstealth-analyzer = "netstealth-analyzer.cli:main"
-nsa = "netstealth-analyzer.cli:main"
+netstealth-analyzer = "netstealth_analyzer.cli:main"
+nsa = "netstealth_analyzer.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["netstealth-analyzer"]
+packages = ["netstealth_analyzer"]
 
 [tool.black]
 line-length = 100
@@ -135,7 +135,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["netstealth-analyzer"]
+source = ["netstealth_analyzer"]
 branch = true
 
 [tool.coverage.report]

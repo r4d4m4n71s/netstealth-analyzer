@@ -7,7 +7,7 @@ log files and detect stealth operation issues.
 
 import logging
 from pathlib import Path
-from netstealth-analyzer import NetStealthAnalyzer
+from netstealth_analyzer import NetStealthAnalyzer
 
 def main():
     """Demonstrate basic NetStealth Analyzer functionality."""

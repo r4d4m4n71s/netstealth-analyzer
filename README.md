@@ -50,7 +50,7 @@ pip install netstealth-analyzer[dev]
 ## Quick Start
 
 ```python
-from netstealth-analyzer import NetStealthAnalyzer
+from netstealth_analyzer import NetStealthAnalyzer
 
 # Initialize analyzer
 analyzer = NetStealthAnalyzer()
@@ -105,7 +105,7 @@ The analyzer can optionally integrate with network stealth libraries:
 
 ```python
 from netstealth import NetworkStealthSession
-from netstealth-analyzer import NetStealthAnalyzer
+from netstealth_analyzer import NetStealthAnalyzer
 
 # Optional analysis after stealth session
 session = NetworkStealthSession(enable_analyzer=True)
@@ -161,7 +161,7 @@ detection_rules:
 
 ### Custom Detection Rules
 ```python
-from netstealth-analyzer import DetectionRule, IssueCategory, SeverityLevel
+from netstealth_analyzer import DetectionRule, IssueCategory, SeverityLevel
 
 custom_rule = DetectionRule(
     id="custom_detection",
