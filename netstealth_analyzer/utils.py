@@ -1,4 +1,4 @@
-"""Utility functions for TIDAL Stealth Analyzer."""
+"""Utility functions for Stealth Analyzer."""
 
 import logging
 import yaml

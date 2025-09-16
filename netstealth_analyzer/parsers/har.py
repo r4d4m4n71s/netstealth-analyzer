@@ -11,23 +11,25 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from ..models import LogFormat
+from ..models import LogFormat, AnalysisConfig
 
 
 class HarParser:
     """Parser for HAR (HTTP Archive) files."""
     
-    def __init__(self):
-        """Initialize HAR parser."""
-        # TIDAL-specific patterns for URL analysis
-        self.tidal_domains = [
-            'link.tidal.com',
-            'offer.tidal.com', 
-            'login.tidal.com',
-            'api.tidal.com',
-            'dd.tidal.com',
-            'resources.tidal.com'
-        ]
+    def __init__(self, config: AnalysisConfig = None):
+        """
+        Initialize HAR parser.
+        
+        Args:
+            config: Analysis configuration containing service domains and other settings
+        """
+        if config is None:
+            config = AnalysisConfig()
+        
+        self.config = config
+        # Service-specific patterns for URL analysis (configurable)
+        self.service_domains = config.service_domains
         
         # Proxy-revealing headers to detect
         self.proxy_headers = [
@@ -89,7 +91,7 @@ class HarParser:
             'statistics': {
                 'total_requests': 0,
                 'successful_responses': 0,
-                'tidal_requests': 0,
+                'service_requests': 0,
                 'proxy_indicators': 0,
                 'ip_detection_requests': 0,
             }
@@ -133,7 +135,7 @@ class HarParser:
             'timestamp': entry.get('startedDateTime'),
             
             # Analysis flags
-            'is_tidal': self._is_tidal_domain(domain),
+            'is_service': self._is_service_domain(domain),
             'is_ip_detection': self._is_ip_detection_service(domain),
             'has_proxy_headers': self._has_proxy_headers(request.get('headers', [])),
             'is_oauth_related': self._is_oauth_related(url),
@@ -176,7 +178,7 @@ class HarParser:
         request_data['response_time'] = response_data['total_time']
         response_data['request_url'] = request_data['url']
         response_data['request_method'] = request_data['method']
-        response_data['is_tidal'] = request_data['is_tidal']
+        response_data['is_service'] = request_data['is_service']
         
         data['requests'].append(request_data)
         data['responses'].append(response_data)
@@ -185,8 +187,8 @@ class HarParser:
         data['statistics']['total_requests'] += 1
         if response_data['is_success']:
             data['statistics']['successful_responses'] += 1
-        if request_data['is_tidal']:
-            data['statistics']['tidal_requests'] += 1
+        if request_data['is_service']:
+            data['statistics']['service_requests'] += 1
         if request_data['has_proxy_headers'] or response_data['has_proxy_response_headers']:
             data['statistics']['proxy_indicators'] += 1
         if request_data['is_ip_detection']:
@@ -201,7 +203,7 @@ class HarParser:
                 'connect_time': timings.get('connect', -1),
                 'timestamp': entry.get('startedDateTime'),
                 'index': index,
-                'is_tidal': request_data['is_tidal'],
+                'is_service': request_data['is_service'],
                 'success': response_data['is_success']
             }
             data['tls_events'].append(tls_event)
@@ -216,7 +218,7 @@ class HarParser:
                 'response_headers': [h for h in response_data['headers'] if h['name'].lower() in [ph.lower() for ph in self.proxy_headers]],
                 'timestamp': entry.get('startedDateTime'),
                 'index': index,
-                'detection_risk': 'high' if domain in self.tidal_domains else 'medium'
+                'detection_risk': 'high' if domain in self.service_domains else 'medium'
             }
             data['proxy_events'].append(proxy_event)
         
@@ -230,7 +232,7 @@ class HarParser:
                 'status_text': response_data['status_text'],
                 'timestamp': entry.get('startedDateTime'),
                 'index': index,
-                'is_tidal': request_data['is_tidal'],
+                'is_service': request_data['is_service'],
                 'severity': 'high' if response_data['is_server_error'] else 'medium'
             }
             data['errors'].append(error_event)
@@ -244,7 +246,7 @@ class HarParser:
             'url': url[:100] + '...' if len(url) > 100 else url,
             'status': response_data['status'],
             'duration_ms': response_data['total_time'],
-            'is_tidal_related': request_data['is_tidal'],
+            'is_service_related': request_data['is_service'],
             'is_error': not response_data['is_success']
         }
         data['timeline'].append(timeline_entry)
@@ -260,7 +262,7 @@ class HarParser:
             'index': index,
             'connect_time': timings.get('connect', -1),
             'ssl_time': timings.get('ssl', -1),
-            'is_tidal': request_data['is_tidal']
+            'is_service': request_data['is_service']
         }
         data['connections'].append(connection_entry)
     
@@ -298,9 +300,9 @@ class HarParser:
                 return header.get('value', '')
         return None
     
-    def _is_tidal_domain(self, domain: str) -> bool:
-        """Check if domain is TIDAL-related."""
-        return any(tidal_domain in domain for tidal_domain in self.tidal_domains)
+    def _is_service_domain(self, domain: str) -> bool:
+        """Check if domain is service-related."""
+        return any(service_domain in domain for service_domain in self.service_domains)
     
     def _is_ip_detection_service(self, domain: str) -> bool:
         """Check if domain is an IP detection service."""
@@ -327,13 +329,13 @@ class HarParser:
         else:
             stats['success_rate'] = 0
         
-        # Calculate TIDAL success rate
-        tidal_responses = [r for r in data['responses'] if r.get('is_tidal')]
-        if tidal_responses:
-            successful_tidal = len([r for r in tidal_responses if r['is_success']])
-            stats['tidal_success_rate'] = (successful_tidal / len(tidal_responses)) * 100
+        # Calculate service success rate
+        service_responses = [r for r in data['responses'] if r.get('is_service')]
+        if service_responses:
+            successful_service = len([r for r in service_responses if r['is_success']])
+            stats['service_success_rate'] = (successful_service / len(service_responses)) * 100
         else:
-            stats['tidal_success_rate'] = 0
+            stats['service_success_rate'] = 0
         
         # Count unique domains
         unique_domains = set()
@@ -380,18 +382,18 @@ class HarParser:
             stats['max_ssl_time'] = 0
         
         # Proxy detection risk assessment
-        total_tidal_requests = stats['tidal_requests']
-        tidal_proxy_indicators = len([e for e in data['proxy_events'] 
-                                    if e.get('detection_risk') == 'high'])
+        total_service_requests = stats['service_requests']
+        service_proxy_indicators = len([e for e in data['proxy_events'] 
+                                      if e.get('detection_risk') == 'high'])
         
-        if total_tidal_requests > 0:
-            stats['proxy_detection_risk'] = (tidal_proxy_indicators / total_tidal_requests) * 100
+        if total_service_requests > 0:
+            stats['proxy_detection_risk'] = (service_proxy_indicators / total_service_requests) * 100
         else:
             stats['proxy_detection_risk'] = 0
         
         # OAuth flow analysis
         oauth_requests = [r for r in data['requests'] if r.get('is_oauth_related')]
-        oauth_responses = [r for r in data['responses'] if r.get('is_tidal') and 
+        oauth_responses = [r for r in data['responses'] if r.get('is_service') and 
                           any(oauth_req['index'] == r['index'] for oauth_req in oauth_requests)]
         
         stats['oauth_requests'] = len(oauth_requests)

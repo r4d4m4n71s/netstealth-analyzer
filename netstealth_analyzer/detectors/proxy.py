@@ -1,5 +1,5 @@
 """
-Proxy detection detector for TIDAL Stealth Analyzer.
+Proxy detection detector for Stealth Analyzer.
 
 This module detects proxy usage indicators, header leakage,
 and other signs that could reveal proxy usage to target services.
@@ -17,6 +17,7 @@ class ProxyDetector:
     def __init__(self, config: AnalysisConfig):
         """Initialize proxy detector with configuration."""
         self.config = config
+        self.target_geography = config.target_geography
         
         # Proxy detection patterns and severity mappings
         self.proxy_issues = {
@@ -155,15 +156,15 @@ class ProxyDetector:
                         'url': request.get('url', ''),
                         'domain': request.get('domain', ''),
                         'exposed_headers': exposed_headers,
-                        'is_tidal': request.get('is_tidal', False)
+                        'is_service': request.get('is_service', False)
                     })
         
         if header_exposures:
             issue_config = self.proxy_issues['proxy_headers_exposed']
             
             # Analyze exposure patterns
-            tidal_exposures = [e for e in header_exposures if e.get('is_tidal') or 
-                             any('tidal.com' in str(e.get(key, '')) for key in ['url', 'domain'])]
+            service_exposures = [e for e in header_exposures if e.get('is_service') or
+                               any('example.com' in str(e.get(key, '')) for key in ['url', 'domain'])]
             
             # Count unique header types exposed
             exposed_header_types = set()
@@ -182,15 +183,15 @@ class ProxyDetector:
                 title="Proxy Headers Exposed to Target Services",
                 description=f"Proxy-revealing headers detected in {len(header_exposures)} requests. "
                            f"Headers exposed: {', '.join(exposed_header_types)}. "
-                           f"TIDAL requests affected: {len(tidal_exposures)}. "
+                           f"Service requests affected: {len(service_exposures)}. "
                            f"This clearly indicates proxy usage to target services.",
                 timestamp=datetime.now(),
                 recommendation=issue_config['recommendation'],
                 code_fix=issue_config['code_fix'],
-                impact_score=issue_config['impact_score'] + (10 if tidal_exposures else 0),
+                impact_score=min(100, issue_config['impact_score'] + (10 if service_exposures else 0)),
                 raw_data={
                     'total_exposures': len(header_exposures),
-                    'tidal_exposures': len(tidal_exposures),
+                    'service_exposures': len(service_exposures),
                     'exposed_headers': list(exposed_header_types),
                     'sample_exposures': header_exposures[:3]
                 }
@@ -277,13 +278,13 @@ class ProxyDetector:
                         proxy_related_uas.append({
                             'user_agent': ua_value,
                             'url': request.get('url', ''),
-                            'is_tidal': request.get('is_tidal', False)
+                            'is_service': request.get('is_service', False)
                         })
         
         if proxy_related_uas:
             issue_config = self.proxy_issues['proxy_user_agent']
             
-            tidal_affected = [ua for ua in proxy_related_uas if ua['is_tidal']]
+            service_affected = [ua for ua in proxy_related_uas if ua['is_service']]
             
             issue = CriticalIssue(
                 id="PROXY_USER_AGENT_DETECTED",
@@ -291,15 +292,15 @@ class ProxyDetector:
                 severity=issue_config['severity'],
                 title="Proxy-Related User Agent Detected",
                 description=f"User agents containing proxy indicators detected: {len(proxy_related_uas)} requests. "
-                           f"TIDAL requests affected: {len(tidal_affected)}. "
+                           f"Service requests affected: {len(service_affected)}. "
                            f"This clearly reveals automation/proxy usage.",
                 timestamp=datetime.now(),
                 recommendation=issue_config['recommendation'],
                 code_fix=issue_config['code_fix'],
-                impact_score=issue_config['impact_score'] + (15 if tidal_affected else 0),
+                impact_score=min(100, issue_config['impact_score'] + (15 if service_affected else 0)),
                 raw_data={
                     'proxy_user_agents': [ua['user_agent'] for ua in proxy_related_uas],
-                    'tidal_affected_count': len(tidal_affected)
+                    'service_affected_count': len(service_affected)
                 }
             )
             issues.append(issue)
@@ -376,6 +377,9 @@ class ProxyDetector:
         
         # Extract geographic information from various sources
         geo_indicators = {}
+        target_country = self.target_geography.country_name.lower()
+        target_language = self.target_geography.language.lower()
+        target_timezone = self.target_geography.timezone.lower()
         
         # Check for geo information in requests or logs
         for source_data in parsed_data.get('sources', []):
@@ -385,10 +389,10 @@ class ProxyDetector:
                 # Check exit IPs for geographic information
                 exit_ips = source_data.get('data', {}).get('exit_ips', [])
                 for exit_ip in exit_ips:
-                    if exit_ip.get('is_colombia_ip'):
-                        geo_indicators['exit_ip_colombia'] = True
+                    if exit_ip.get('is_target_geo_ip'):
+                        geo_indicators['exit_ip_target_geo'] = True
                     else:
-                        geo_indicators['exit_ip_non_colombia'] = True
+                        geo_indicators['exit_ip_non_target_geo'] = True
             
             elif source_format in ['har', 'mitmproxy']:
                 # Check for timezone or location headers
@@ -399,19 +403,25 @@ class ProxyDetector:
                         header_name = header.get('name', '').lower()
                         header_value = header.get('value', '').lower()
                         
-                        if 'timezone' in header_name and 'bogota' not in header_value:
-                            geo_indicators['timezone_mismatch'] = True
-                        elif 'accept-language' in header_name and 'es' not in header_value:
-                            geo_indicators['language_mismatch'] = True
+                        # Check timezone consistency
+                        if 'timezone' in header_name:
+                            if target_timezone not in header_value:
+                                geo_indicators['timezone_mismatch'] = True
+                        
+                        # Check language consistency
+                        elif 'accept-language' in header_name:
+                            expected_lang = target_language.split('-')[0]  # e.g., 'en' from 'en-US'
+                            if expected_lang not in header_value:
+                                geo_indicators['language_mismatch'] = True
         
         # Check for geographic inconsistencies
         inconsistencies = []
-        if geo_indicators.get('exit_ip_colombia') and geo_indicators.get('timezone_mismatch'):
-            inconsistencies.append('Colombia IP but non-Colombia timezone')
-        if geo_indicators.get('exit_ip_colombia') and geo_indicators.get('language_mismatch'):
-            inconsistencies.append('Colombia IP but non-Spanish language preference')
-        if geo_indicators.get('exit_ip_non_colombia'):
-            inconsistencies.append('Non-Colombia exit IP detected')
+        if geo_indicators.get('exit_ip_target_geo') and geo_indicators.get('timezone_mismatch'):
+            inconsistencies.append(f'{target_country} IP but non-{target_country} timezone')
+        if geo_indicators.get('exit_ip_target_geo') and geo_indicators.get('language_mismatch'):
+            inconsistencies.append(f'{target_country} IP but non-{target_language} language preference')
+        if geo_indicators.get('exit_ip_non_target_geo'):
+            inconsistencies.append(f'Non-{target_country} exit IP detected')
         
         if inconsistencies:
             issue_config = self.proxy_issues['geo_inconsistency']
@@ -424,12 +434,17 @@ class ProxyDetector:
                 description=f"Geographic inconsistencies detected: {', '.join(inconsistencies)}. "
                            f"These inconsistencies could be flagged by geo-location verification systems.",
                 timestamp=datetime.now(),
-                recommendation=issue_config['recommendation'],
-                code_fix=issue_config['code_fix'],
+                recommendation=f"Ensure geographic consistency with target location ({target_country})",
+                code_fix=f"Use proxy servers from {target_country} and set appropriate timezone/language headers",
                 impact_score=issue_config['impact_score'],
                 raw_data={
                     'inconsistencies': inconsistencies,
-                    'geo_indicators': geo_indicators
+                    'geo_indicators': geo_indicators,
+                    'target_geography': {
+                        'country': target_country,
+                        'language': target_language,
+                        'timezone': target_timezone
+                    }
                 }
             )
             issues.append(issue)

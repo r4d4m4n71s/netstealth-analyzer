@@ -1,5 +1,5 @@
 """
-Mitmproxy log parser for TIDAL Stealth Analyzer.
+Mitmproxy log parser for NetStealth Analyzer.
 
 This module parses mitmproxy debug logs to extract network connections,
 requests, responses, TLS events, and proxy-related information.
@@ -32,9 +32,9 @@ class MitmproxyParser:
             'connection_error': re.compile(r'connection.*?failed|timeout|refused', re.IGNORECASE),
         }
         
-        # TIDAL-specific patterns
-        self.tidal_patterns = {
-            'tidal_domains': re.compile(r'(link\.tidal\.com|offer\.tidal\.com|login\.tidal\.com|dd\.tidal\.com|api\.tidal\.com)'),
+        # Service-specific patterns
+        self.service_patterns = {
+            'service_domains': re.compile(r'(link\.example\.com|offer\.example\.com|login\.example\.com|dd\.example\.com|api\.example\.com)'),
             'oauth_flow': re.compile(r'(authorize|oauth|token)', re.IGNORECASE),
             'datadome': re.compile(r'(captcha-delivery\.com|datadome|x-datadome)', re.IGNORECASE),
             'proxy_headers': re.compile(r'(X-Forwarded-For|X-Real-IP|Via|Proxy)', re.IGNORECASE),
@@ -73,7 +73,7 @@ class MitmproxyParser:
             'statistics': {
                 'total_requests': 0,
                 'successful_responses': 0,
-                'tidal_requests': 0,
+                'service_requests': 0,
                 'proxy_errors': 0,
                 'tls_errors': 0,
             }
@@ -105,7 +105,7 @@ class MitmproxyParser:
                     'line_number': line_num,
                     'event_type': self._classify_line(line),
                     'content': line.strip()[:200],  # Truncate long lines
-                    'is_tidal_related': bool(self.tidal_patterns['tidal_domains'].search(line))
+                    'is_service_related': bool(self.service_patterns['service_domains'].search(line))
                 }
                 parsed_data['timeline'].append(timeline_entry)
         
@@ -142,7 +142,7 @@ class MitmproxyParser:
                 'server_ip': ip,
                 'timestamp': timestamp,
                 'line_number': line_num,
-                'is_tidal': bool(self.tidal_patterns['tidal_domains'].search(server)),
+                'is_service': bool(self.service_patterns['service_domains'].search(server)),
                 'is_upstream_proxy': 'geo.iproyal.com' in server or 'proxy' in server.lower(),
                 'upstream_proxy': ip if 'geo.iproyal.com' in server else None
             }
@@ -176,17 +176,17 @@ class MitmproxyParser:
                 'client_id': context.get('current_client'),
                 'server': context.get('current_server'),
                 'server_ip': context.get('current_server_ip'),
-                'is_tidal': bool(self.tidal_patterns['tidal_domains'].search(url)),
-                'is_oauth_related': bool(self.tidal_patterns['oauth_flow'].search(url)),
-                'is_ip_detection': bool(self.tidal_patterns['ip_detection'].search(url)),
-                'has_proxy_headers': bool(self.tidal_patterns['proxy_headers'].search(line)),
+                'is_service': bool(self.service_patterns['service_domains'].search(url)),
+                'is_oauth_related': bool(self.service_patterns['oauth_flow'].search(url)),
+                'is_ip_detection': bool(self.service_patterns['ip_detection'].search(url)),
+                'has_proxy_headers': bool(self.service_patterns['proxy_headers'].search(line)),
             }
             
             data['requests'].append(request)
             data['statistics']['total_requests'] += 1
             
-            if request['is_tidal']:
-                data['statistics']['tidal_requests'] += 1
+            if request['is_service']:
+                data['statistics']['service_requests'] += 1
             
             # Update context for response correlation
             context['last_request'] = request
@@ -217,7 +217,7 @@ class MitmproxyParser:
                 response.update({
                     'request_url': last_req.get('url'),
                     'request_method': last_req.get('method'),
-                    'is_tidal': last_req.get('is_tidal', False),
+                    'is_service': last_req.get('is_service', False),
                     'is_oauth_related': last_req.get('is_oauth_related', False),
                 })
             
@@ -239,7 +239,7 @@ class MitmproxyParser:
                 'timestamp': timestamp,
                 'line_number': line_num,
                 'client_id': context.get('current_client'),
-                'is_tidal': bool(self.tidal_patterns['tidal_domains'].search(server)),
+                'is_service': bool(self.service_patterns['service_domains'].search(server)),
             }
             data['tls_events'].append(tls_event)
             return
@@ -276,7 +276,7 @@ class MitmproxyParser:
             return
         
         # Proxy header detection
-        if self.tidal_patterns['proxy_headers'].search(line):
+        if self.service_patterns['proxy_headers'].search(line):
             proxy_event = {
                 'type': 'proxy_header_detected',
                 'header_info': line.strip(),
@@ -313,7 +313,7 @@ class MitmproxyParser:
             return 'http_response'
         elif self.patterns['tls_hello'].search(line) or self.patterns['tls_error'].search(line):
             return 'tls_event'
-        elif self.patterns['proxy_error'].search(line) or self.tidal_patterns['proxy_headers'].search(line):
+        elif self.patterns['proxy_error'].search(line) or self.service_patterns['proxy_headers'].search(line):
             return 'proxy_event'
         elif self.patterns['connection_error'].search(line):
             return 'error'
@@ -338,12 +338,12 @@ class MitmproxyParser:
                 unique_servers.add(conn['server'])
         stats['unique_servers'] = len(unique_servers)
         
-        # Count TIDAL-specific metrics
-        tidal_responses = [r for r in data['responses'] if r.get('is_tidal')]
-        stats['tidal_success_rate'] = 0
-        if tidal_responses:
-            successful_tidal = len([r for r in tidal_responses if r['is_success']])
-            stats['tidal_success_rate'] = (successful_tidal / len(tidal_responses)) * 100
+        # Count service-specific metrics
+        service_responses = [r for r in data['responses'] if r.get('is_service')]
+        stats['service_success_rate'] = 0
+        if service_responses:
+            successful_service = len([r for r in service_responses if r['is_success']])
+            stats['service_success_rate'] = (successful_service / len(service_responses)) * 100
         
         # Count OAuth flow completions
         oauth_requests = [r for r in data['requests'] if r.get('is_oauth_related')]

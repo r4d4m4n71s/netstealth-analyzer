@@ -1,4 +1,4 @@
-"""Network anomaly detector for TIDAL Stealth Analyzer."""
+"""Network anomaly detector for Stealth Analyzer."""
 
 from typing import Any, Dict, List
 from datetime import datetime

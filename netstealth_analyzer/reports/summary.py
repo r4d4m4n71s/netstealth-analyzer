@@ -1,4 +1,4 @@
-"""Summary report generator for TIDAL Stealth Analyzer."""
+"""Summary report generator for NetStealth Analyzer."""
 
 from typing import Dict, List
 from tabulate import tabulate
@@ -17,7 +17,7 @@ class SummaryReportGenerator:
         
         # Header
         lines.append("=" * 70)
-        lines.append("🔍 TIDAL STEALTH ANALYZER REPORT")
+        lines.append("🔍 NETSTEALTH ANALYZER REPORT")
         lines.append("=" * 70)
         lines.append(f"Analysis Date: {result.summary.timestamp}")
         lines.append(f"Overall Status: {result.summary.status}")

@@ -1,4 +1,4 @@
-"""Report generators for TIDAL Stealth Analyzer."""
+"""Report generators for NetStealth Analyzer."""
 
 from .summary import SummaryReportGenerator
 

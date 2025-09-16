@@ -41,10 +41,10 @@ class BrowserLogParser:
             'viewport_check': re.compile(r'viewport|screen.*?resolution|window.*?size', re.IGNORECASE),
         }
         
-        # TIDAL-specific patterns
-        self.tidal_patterns = {
-            'tidal_domains': re.compile(r'(link\.tidal\.com|offer\.tidal\.com|login\.tidal\.com|api\.tidal\.com)'),
-            'tidal_api': re.compile(r'tidal.*?api|api.*?tidal', re.IGNORECASE),
+        # Service-specific patterns
+        self.service_patterns = {
+            'service_domains': re.compile(r'(link\.example\.com|offer\.example\.com|login\.example\.com|api\.example\.com)'),
+            'service_api': re.compile(r'service.*?api|api.*?service', re.IGNORECASE),
             'oauth_flow': re.compile(r'oauth|authorize|token.*?exchange', re.IGNORECASE),
             'player_errors': re.compile(r'player.*?error|playback.*?error|audio.*?error', re.IGNORECASE),
         }
@@ -79,7 +79,7 @@ class BrowserLogParser:
             'network_errors': [],
             'security_issues': [],
             'detection_events': [],
-            'tidal_events': [],
+            'service_events': [],
             'browser_events': [],
             'errors': [],
             'timeline': [],
@@ -87,7 +87,7 @@ class BrowserLogParser:
                 'total_log_entries': 0,
                 'javascript_errors': 0,
                 'detection_attempts': 0,
-                'tidal_related_events': 0,
+                'service_related_events': 0,
                 'security_violations': 0,
             }
         }
@@ -107,7 +107,7 @@ class BrowserLogParser:
             self._parse_network_errors(line, line_num, timestamp, log_level, parsed_data)
             self._parse_security_issues(line, line_num, timestamp, log_level, parsed_data)
             self._parse_detection_events(line, line_num, timestamp, log_level, parsed_data)
-            self._parse_tidal_events(line, line_num, timestamp, log_level, parsed_data)
+            self._parse_service_events(line, line_num, timestamp, log_level, parsed_data)
             self._parse_browser_events(line, line_num, timestamp, log_level, parsed_data)
             
             # Add to timeline
@@ -117,7 +117,7 @@ class BrowserLogParser:
                 'log_level': log_level,
                 'content': line.strip()[:250],  # Truncate very long lines
                 'event_type': self._classify_browser_line(line),
-                'is_tidal_related': bool(self.tidal_patterns['tidal_domains'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_domains'].search(line)),
                 'is_detection_related': any(pattern.search(line) for pattern in self.detection_patterns.values()),
                 'is_error': log_level in ['ERROR', 'SEVERE', 'FATAL'] or 'error' in line.lower(),
             }
@@ -179,7 +179,7 @@ class BrowserLogParser:
                 'line_number': line_num,
                 'log_level': log_level,
                 'console_method': self._extract_console_method(line),
-                'is_tidal_related': bool(self.tidal_patterns['tidal_domains'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_domains'].search(line)),
                 'is_detection_related': any(pattern.search(line) for pattern in self.detection_patterns.values())
             }
             data['console_logs'].append(console_entry)
@@ -197,7 +197,7 @@ class BrowserLogParser:
                 'log_level': log_level,
                 'error_type': self._classify_js_error(line),
                 'source_url': self._extract_source_url(line),
-                'is_tidal_related': bool(self.tidal_patterns['tidal_domains'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_domains'].search(line)),
                 'is_critical': 'uncaught' in line.lower() or 'unhandled' in line.lower(),
             }
             data['javascript_errors'].append(js_error)
@@ -214,7 +214,7 @@ class BrowserLogParser:
                 'log_level': log_level,
                 'error_code': self._extract_error_code(line),
                 'url': self._extract_source_url(line),
-                'is_tidal_related': bool(self.tidal_patterns['tidal_domains'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_domains'].search(line)),
                 'is_timeout': 'timeout' in line.lower(),
                 'is_connection_error': 'connection' in line.lower() or 'refused' in line.lower(),
             }
@@ -231,7 +231,7 @@ class BrowserLogParser:
                 'log_level': log_level,
                 'issue_type': self._classify_security_issue(line),
                 'source_url': self._extract_source_url(line),
-                'is_tidal_related': bool(self.tidal_patterns['tidal_domains'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_domains'].search(line)),
                 'severity': self._assess_security_severity(line),
             }
             data['security_issues'].append(security_issue)
@@ -261,23 +261,23 @@ class BrowserLogParser:
             data['detection_events'].append(detection_event)
             data['statistics']['detection_attempts'] += 1
     
-    def _parse_tidal_events(self, line: str, line_num: int, timestamp: Optional[str],
+    def _parse_service_events(self, line: str, line_num: int, timestamp: Optional[str],
                           log_level: str, data: Dict) -> None:
-        """Parse TIDAL-specific events."""
-        if any(pattern.search(line) for pattern in self.tidal_patterns.values()):
-            tidal_event = {
+        """Parse service-specific events."""
+        if any(pattern.search(line) for pattern in self.service_patterns.values()):
+            service_event = {
                 'event_description': line.strip(),
                 'timestamp': timestamp,
                 'line_number': line_num,
                 'log_level': log_level,
-                'event_category': self._classify_tidal_event(line),
-                'is_api_related': bool(self.tidal_patterns['tidal_api'].search(line)),
-                'is_oauth_related': bool(self.tidal_patterns['oauth_flow'].search(line)),
-                'is_player_error': bool(self.tidal_patterns['player_errors'].search(line)),
+                'event_category': self._classify_service_event(line),
+                'is_api_related': bool(self.service_patterns['service_api'].search(line)),
+                'is_oauth_related': bool(self.service_patterns['oauth_flow'].search(line)),
+                'is_player_error': bool(self.service_patterns['player_errors'].search(line)),
                 'severity': log_level,
             }
-            data['tidal_events'].append(tidal_event)
-            data['statistics']['tidal_related_events'] += 1
+            data['service_events'].append(service_event)
+            data['statistics']['service_related_events'] += 1
     
     def _parse_browser_events(self, line: str, line_num: int, timestamp: Optional[str],
                             log_level: str, data: Dict) -> None:
@@ -358,19 +358,19 @@ class BrowserLogParser:
         else:
             return 'general_security'
     
-    def _classify_tidal_event(self, line: str) -> str:
-        """Classify TIDAL event type."""
+    def _classify_service_event(self, line: str) -> str:
+        """Classify service event type."""
         line_lower = line.lower()
-        if self.tidal_patterns['tidal_api'].search(line):
+        if self.service_patterns['service_api'].search(line):
             return 'api_event'
-        elif self.tidal_patterns['oauth_flow'].search(line):
+        elif self.service_patterns['oauth_flow'].search(line):
             return 'oauth_event'
-        elif self.tidal_patterns['player_errors'].search(line):
+        elif self.service_patterns['player_errors'].search(line):
             return 'player_event'
         elif 'login' in line_lower or 'auth' in line_lower:
             return 'authentication_event'
         else:
-            return 'general_tidal'
+            return 'general_service'
     
     def _classify_browser_event(self, line: str) -> str:
         """Classify browser event type."""
@@ -398,8 +398,8 @@ class BrowserLogParser:
             return 'security_issue'
         elif any(pattern.search(line) for pattern in self.detection_patterns.values()):
             return 'detection_event'
-        elif any(pattern.search(line) for pattern in self.tidal_patterns.values()):
-            return 'tidal_event'
+        elif any(pattern.search(line) for pattern in self.service_patterns.values()):
+            return 'service_event'
         else:
             return 'general'
     
@@ -433,11 +433,11 @@ class BrowserLogParser:
         total_entries = stats['total_log_entries']
         if total_entries > 0:
             stats['error_rate'] = (stats['javascript_errors'] / total_entries) * 100
-            stats['tidal_event_percentage'] = (stats['tidal_related_events'] / total_entries) * 100
+            stats['service_event_percentage'] = (stats['service_related_events'] / total_entries) * 100
             stats['detection_attempt_rate'] = (stats['detection_attempts'] / total_entries) * 100
         else:
             stats['error_rate'] = 0
-            stats['tidal_event_percentage'] = 0
+            stats['service_event_percentage'] = 0
             stats['detection_attempt_rate'] = 0
         
         # Count events by severity
@@ -453,13 +453,13 @@ class BrowserLogParser:
             all_detection_types.update(event.get('detection_types', []))
         stats['unique_detection_types'] = len(all_detection_types)
         
-        # TIDAL-specific metrics
-        stats['tidal_api_events'] = len([e for e in data['tidal_events'] 
-                                       if e.get('is_api_related')])
-        stats['tidal_oauth_events'] = len([e for e in data['tidal_events'] 
-                                         if e.get('is_oauth_related')])
-        stats['tidal_player_errors'] = len([e for e in data['tidal_events'] 
-                                          if e.get('is_player_error')])
+        # Service-specific metrics
+        stats['service_api_events'] = len([e for e in data['service_events'] 
+                                         if e.get('is_api_related')])
+        stats['service_oauth_events'] = len([e for e in data['service_events'] 
+                                           if e.get('is_oauth_related')])
+        stats['service_player_errors'] = len([e for e in data['service_events'] 
+                                            if e.get('is_player_error')])
         
         # Network error analysis
         stats['network_errors'] = len(data['network_errors'])
@@ -473,6 +473,6 @@ class BrowserLogParser:
             max(0.0, 1.0 - (stats['error_rate'] / 100.0)),  # Lower error rate is better
             max(0.0, 1.0 - (stats['detection_attempt_rate'] / 100.0)),  # Lower detection rate is better
             max(0.0, 1.0 - (stats['high_severity_events'] / max(total_entries, 1))),  # Fewer severe events is better
-            1.0 if stats['tidal_related_events'] > 0 else 0.5,  # Having TIDAL events indicates activity
+            1.0 if stats['service_related_events'] > 0 else 0.5,  # Having service events indicates activity
         ]
         stats['browser_health_score'] = (sum(health_factors) / len(health_factors)) * 100

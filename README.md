@@ -49,10 +49,11 @@ pip install netstealth-analyzer[dev]
 
 ## Quick Start
 
+### Basic Usage
 ```python
 from netstealth_analyzer import NetStealthAnalyzer
 
-# Initialize analyzer
+# Initialize analyzer with default configuration
 analyzer = NetStealthAnalyzer()
 
 # Analyze single log file
@@ -61,17 +62,39 @@ result = analyzer.analyze_single_file('logs/mitmproxy.log')
 # Print summary
 print(f"Analysis Score: {result.summary.overall_score}/100")
 print(f"Issues Found: {result.summary.total_issues_count}")
+```
 
-# Analyze multiple sources
-config = {
-    'auto_remediation': True,
-    'fingerprint_comparison': True
-}
+### Configurable Service Patterns & Geography
+```python
+from netstealth_analyzer import NetStealthAnalyzer
+from netstealth_analyzer.models import AnalysisConfig, TargetGeography
+
+# Configure for specific service and geography
+target_geography = TargetGeography(
+    country_code="GB",
+    country_name="United Kingdom", 
+    ip_ranges=["203.0.113.0/24"],
+    timezone="Europe/London",
+    language="en-GB"
+)
+
+config = AnalysisConfig(
+    service_domains=[
+        "mystore.com",
+        "api.mystore.com", 
+        "auth.mystore.com"
+    ],
+    target_geography=target_geography,
+    auto_remediation=True,
+    fingerprint_comparison=True
+)
+
 analyzer = NetStealthAnalyzer(config=config)
 
+# Analyze multiple sources
 result = analyzer.analyze([
     'logs/mitmproxy.log',
-    'logs/browser_console.log',
+    'logs/browser_console.log', 
     'logs/execution.log'
 ])
 ```

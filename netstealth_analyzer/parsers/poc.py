@@ -11,14 +11,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..models import LogFormat
+from ..models import LogFormat, AnalysisConfig
 
 
 class PocExecutionParser:
-    """Parser for POC execution logs from tidal_proxy_poc.py."""
+    """Parser for POC execution logs from proxy POC scripts."""
     
-    def __init__(self):
-        """Initialize POC execution parser with patterns."""
+    def __init__(self, config: AnalysisConfig = None):
+        """
+        Initialize POC execution parser with patterns.
+        
+        Args:
+            config: Analysis configuration containing service domains and geography settings
+        """
+        if config is None:
+            config = AnalysisConfig()
+        
+        self.config = config
         # Patterns for POC log entries
         self.patterns = {
             'timestamp': re.compile(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'),
@@ -26,21 +35,55 @@ class PocExecutionParser:
             'exit_ip_detected': re.compile(r'EXIT_IP_DETECTED:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'),
             'httpbin_response': re.compile(r'mitmproxy test response:\s*(.+)'),
             'oauth_step': re.compile(r'OAuth.*?(success|failed|complete|redirect)', re.IGNORECASE),
-            'tidal_login': re.compile(r'(login|auth).*?tidal', re.IGNORECASE),
+            'service_login': re.compile(r'(login|auth).*?service', re.IGNORECASE),
             'proxy_connection': re.compile(r'proxy.*?connect|upstream.*?connect', re.IGNORECASE),
             'browser_startup': re.compile(r'browser.*?start|chrome.*?start', re.IGNORECASE),
             'error_pattern': re.compile(r'error|exception|failed|timeout', re.IGNORECASE),
             'success_pattern': re.compile(r'success|complete|ok|200', re.IGNORECASE),
         }
         
-        # TIDAL-specific patterns
-        self.tidal_patterns = {
-            'tidal_urls': re.compile(r'(link\.tidal\.com|offer\.tidal\.com|login\.tidal\.com)'),
-            'oauth_redirect': re.compile(r'redirect.*?tidal|tidal.*?redirect', re.IGNORECASE),
+        # Service-specific patterns (configurable)
+        service_domains_escaped = [re.escape(domain) for domain in config.service_domains]
+        service_pattern = '|'.join(service_domains_escaped)
+        
+        self.service_patterns = {
+            'service_urls': re.compile(f'({service_pattern})', re.IGNORECASE),
+            'oauth_redirect': re.compile(r'redirect.*?service|service.*?redirect', re.IGNORECASE),
             'datadome_bypass': re.compile(r'datadome.*?bypass|bypass.*?datadome', re.IGNORECASE),
-            'colombia_ip': re.compile(r'186\.84\.\d+\.\d+|colombia|CO\b', re.IGNORECASE),
             'geo_detection': re.compile(r'geo.*?detect|location.*?detect', re.IGNORECASE),
         }
+        
+        # Target geography patterns (configurable)
+        self.target_geography = config.target_geography
+        self._build_geography_patterns()
+    
+    def _build_geography_patterns(self):
+        """Build geography detection patterns from configuration."""
+        # Build IP range patterns if specified
+        self.target_ip_patterns = []
+        for ip_range in self.target_geography.ip_ranges:
+            # Convert CIDR to regex pattern (simplified)
+            if '/' in ip_range:
+                base_ip = ip_range.split('/')[0]
+                # For simplicity, match the first 3 octets for /24 networks
+                if ip_range.endswith('/24'):
+                    base_parts = base_ip.split('.')[:3]
+                    pattern = r'\.'.join(base_parts) + r'\.\d{1,3}'
+                    self.target_ip_patterns.append(re.compile(pattern))
+            else:
+                # Exact IP match
+                escaped_ip = re.escape(ip_range)
+                self.target_ip_patterns.append(re.compile(escaped_ip))
+        
+        # Build country/region patterns
+        country_indicators = [
+            self.target_geography.country_code.lower(),
+            self.target_geography.country_name.lower(),
+        ]
+        
+        # Create pattern for target geography detection
+        geo_pattern = '|'.join(re.escape(indicator) for indicator in country_indicators)
+        self.target_geo_pattern = re.compile(f'({geo_pattern})', re.IGNORECASE)
     
     def parse(self, log_path: Path) -> Dict[str, Any]:
         """
@@ -68,7 +111,7 @@ class PocExecutionParser:
             'oauth_events': [],
             'browser_events': [],
             'proxy_events': [],
-            'tidal_events': [],
+            'service_events': [],
             'errors': [],
             'timeline': [],
             'session_info': {
@@ -81,8 +124,8 @@ class PocExecutionParser:
                 'exit_ips_detected': 0,
                 'oauth_steps_completed': 0,
                 'errors_count': 0,
-                'tidal_requests': 0,
-                'colombia_ips_found': 0,
+                'service_requests': 0,
+                'target_geo_ips_found': 0,
             }
         }
         
@@ -115,7 +158,7 @@ class PocExecutionParser:
             self._parse_oauth_events(line, line_num, timestamp, log_level, parsed_data)
             self._parse_browser_events(line, line_num, timestamp, log_level, parsed_data)
             self._parse_proxy_events(line, line_num, timestamp, log_level, parsed_data)
-            self._parse_tidal_events(line, line_num, timestamp, log_level, parsed_data)
+            self._parse_service_events(line, line_num, timestamp, log_level, parsed_data)
             self._parse_errors(line, line_num, timestamp, log_level, parsed_data)
             
             # Add to timeline
@@ -125,7 +168,7 @@ class PocExecutionParser:
                 'log_level': log_level,
                 'content': line.strip()[:300],  # Truncate very long lines
                 'event_type': self._classify_poc_line(line),
-                'is_tidal_related': bool(self.tidal_patterns['tidal_urls'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_urls'].search(line)),
                 'is_error': bool(self.patterns['error_pattern'].search(line)),
             }
             parsed_data['timeline'].append(timeline_entry)
@@ -164,14 +207,14 @@ class PocExecutionParser:
                 'timestamp': timestamp.isoformat() if timestamp else None,
                 'line_number': line_num,
                 'log_level': log_level,
-                'is_colombia_ip': bool(self.tidal_patterns['colombia_ip'].search(detected_ip)),
+                'is_target_geo_ip': self._is_target_geography_ip(detected_ip),
                 'verification_source': 'EXIT_IP_DETECTED log entry'
             }
             data['exit_ips'].append(exit_ip_event)
             data['statistics']['exit_ips_detected'] += 1
             
-            if exit_ip_event['is_colombia_ip']:
-                data['statistics']['colombia_ips_found'] += 1
+            if exit_ip_event['is_target_geo_ip']:
+                data['statistics']['target_geo_ips_found'] += 1
             return
         
         # httpbin.org/ip response parsing
@@ -195,15 +238,15 @@ class PocExecutionParser:
                             'timestamp': timestamp.isoformat() if timestamp else None,
                             'line_number': line_num,
                             'log_level': log_level,
-                            'is_colombia_ip': bool(self.tidal_patterns['colombia_ip'].search(origin_ip)),
+                            'is_target_geo_ip': self._is_target_geography_ip(origin_ip),
                             'verification_source': 'httpbin.org/ip response',
                             'raw_response': response_text[:200]  # First 200 chars
                         }
                         data['exit_ips'].append(exit_ip_event)
                         data['statistics']['exit_ips_detected'] += 1
                         
-                        if exit_ip_event['is_colombia_ip']:
-                            data['statistics']['colombia_ips_found'] += 1
+                        if exit_ip_event['is_target_geo_ip']:
+                            data['statistics']['target_geo_ips_found'] += 1
                 
             except json.JSONDecodeError:
                 # Try regex extraction as fallback
@@ -217,17 +260,20 @@ class PocExecutionParser:
                             'timestamp': timestamp.isoformat() if timestamp else None,
                             'line_number': line_num,
                             'log_level': log_level,
-                            'is_colombia_ip': bool(self.tidal_patterns['colombia_ip'].search(potential_ip)),
+                            'is_target_geo_ip': self._is_target_geography_ip(potential_ip),
                             'verification_source': 'httpbin response (regex)',
                             'raw_response': response_text[:200]
                         }
                         data['exit_ips'].append(exit_ip_event)
                         data['statistics']['exit_ips_detected'] += 1
+                        
+                        if exit_ip_event['is_target_geo_ip']:
+                            data['statistics']['target_geo_ips_found'] += 1
     
     def _parse_oauth_events(self, line: str, line_num: int, timestamp: Optional[datetime],
                           log_level: str, data: Dict) -> None:
         """Parse OAuth-related events."""
-        if self.patterns['oauth_step'].search(line) or self.patterns['tidal_login'].search(line):
+        if self.patterns['oauth_step'].search(line) or self.patterns['service_login'].search(line):
             oauth_event = {
                 'event_description': line.strip(),
                 'timestamp': timestamp.isoformat() if timestamp else None,
@@ -235,7 +281,7 @@ class PocExecutionParser:
                 'log_level': log_level,
                 'is_success': bool(self.patterns['success_pattern'].search(line)),
                 'is_error': bool(self.patterns['error_pattern'].search(line)),
-                'is_redirect': bool(self.tidal_patterns['oauth_redirect'].search(line)),
+                'is_redirect': bool(self.service_patterns['oauth_redirect'].search(line)),
                 'step_type': self._classify_oauth_step(line)
             }
             data['oauth_events'].append(oauth_event)
@@ -274,22 +320,22 @@ class PocExecutionParser:
             }
             data['proxy_events'].append(proxy_event)
     
-    def _parse_tidal_events(self, line: str, line_num: int, timestamp: Optional[datetime],
+    def _parse_service_events(self, line: str, line_num: int, timestamp: Optional[datetime],
                           log_level: str, data: Dict) -> None:
-        """Parse TIDAL-specific events."""
-        if self.tidal_patterns['tidal_urls'].search(line):
-            tidal_event = {
+        """Parse service-specific events."""
+        if self.service_patterns['service_urls'].search(line):
+            service_event = {
                 'event_description': line.strip(),
                 'timestamp': timestamp.isoformat() if timestamp else None,
                 'line_number': line_num,
                 'log_level': log_level,
-                'url_accessed': self._extract_tidal_url(line),
-                'is_oauth_related': bool(self.tidal_patterns['oauth_redirect'].search(line)),
-                'is_datadome_related': bool(self.tidal_patterns['datadome_bypass'].search(line)),
+                'url_accessed': self._extract_service_url(line),
+                'is_oauth_related': bool(self.service_patterns['oauth_redirect'].search(line)),
+                'is_datadome_related': bool(self.service_patterns['datadome_bypass'].search(line)),
                 'is_success': bool(self.patterns['success_pattern'].search(line)),
             }
-            data['tidal_events'].append(tidal_event)
-            data['statistics']['tidal_requests'] += 1
+            data['service_events'].append(service_event)
+            data['statistics']['service_requests'] += 1
     
     def _parse_errors(self, line: str, line_num: int, timestamp: Optional[datetime],
                      log_level: str, data: Dict) -> None:
@@ -304,7 +350,7 @@ class PocExecutionParser:
                 'log_level': log_level,
                 'error_type': self._classify_error_type(line),
                 'is_critical': log_level == 'CRITICAL',
-                'is_tidal_related': bool(self.tidal_patterns['tidal_urls'].search(line)),
+                'is_service_related': bool(self.service_patterns['service_urls'].search(line)),
             }
             data['errors'].append(error_event)
             data['statistics']['errors_count'] += 1
@@ -313,14 +359,14 @@ class PocExecutionParser:
         """Classify POC log line by event type."""
         if self.patterns['exit_ip_detected'].search(line) or self.patterns['httpbin_response'].search(line):
             return 'exit_ip_detection'
-        elif self.patterns['oauth_step'].search(line) or self.patterns['tidal_login'].search(line):
+        elif self.patterns['oauth_step'].search(line) or self.patterns['service_login'].search(line):
             return 'oauth_flow'
         elif self.patterns['browser_startup'].search(line):
             return 'browser_event'
         elif self.patterns['proxy_connection'].search(line):
             return 'proxy_event'
-        elif self.tidal_patterns['tidal_urls'].search(line):
-            return 'tidal_request'
+        elif self.service_patterns['service_urls'].search(line):
+            return 'service_request'
         elif self.patterns['error_pattern'].search(line):
             return 'error'
         else:
@@ -358,9 +404,9 @@ class PocExecutionParser:
         else:
             return 'general_error'
     
-    def _extract_tidal_url(self, line: str) -> Optional[str]:
-        """Extract TIDAL URL from log line."""
-        url_match = self.tidal_patterns['tidal_urls'].search(line)
+    def _extract_service_url(self, line: str) -> Optional[str]:
+        """Extract service URL from log line."""
+        url_match = self.service_patterns['service_urls'].search(line)
         if url_match:
             # Try to extract full URL
             url_start = line.find('http')
@@ -394,14 +440,14 @@ class PocExecutionParser:
         
         # Calculate success rate
         total_events = (len(data['oauth_events']) + len(data['browser_events']) + 
-                       len(data['proxy_events']) + len(data['tidal_events']))
+                       len(data['proxy_events']) + len(data['service_events']))
         
         if total_events > 0:
             successful_events = sum([
                 len([e for e in data['oauth_events'] if e.get('is_success')]),
                 len([e for e in data['browser_events'] if e.get('is_success')]),
                 len([e for e in data['proxy_events'] if e.get('is_success')]),
-                len([e for e in data['tidal_events'] if e.get('is_success')])
+                len([e for e in data['service_events'] if e.get('is_success')])
             ])
             stats['success_rate'] = (successful_events / total_events) * 100
         else:
@@ -411,11 +457,11 @@ class PocExecutionParser:
         unique_ips = set(ip['ip_address'] for ip in data['exit_ips'])
         stats['unique_exit_ips'] = len(unique_ips)
         
-        # Count Colombia IP percentage
+        # Count target geography IP percentage
         if stats['exit_ips_detected'] > 0:
-            stats['colombia_ip_percentage'] = (stats['colombia_ips_found'] / stats['exit_ips_detected']) * 100
+            stats['target_geo_ip_percentage'] = (stats['target_geo_ips_found'] / stats['exit_ips_detected']) * 100
         else:
-            stats['colombia_ip_percentage'] = 0
+            stats['target_geo_ip_percentage'] = 0
         
         # Count critical errors
         stats['critical_errors'] = len([e for e in data['errors'] if e.get('is_critical')])
@@ -431,8 +477,30 @@ class PocExecutionParser:
         health_factors = [
             stats['success_rate'] / 100,
             1.0 if stats['exit_ips_detected'] > 0 else 0.0,
-            1.0 if stats['colombia_ips_found'] > 0 else 0.0,
+            1.0 if stats['target_geo_ips_found'] > 0 else 0.0,
             max(0.0, 1.0 - (stats['critical_errors'] / 10.0)),  # Penalty for critical errors
             stats['oauth_completion_rate'] / 100
         ]
         stats['session_health_score'] = (sum(health_factors) / len(health_factors)) * 100
+    
+    def _is_target_geography_ip(self, ip_address: str) -> bool:
+        """
+        Check if IP address matches target geography configuration.
+        
+        Args:
+            ip_address: IP address to check
+            
+        Returns:
+            True if IP matches target geography patterns
+        """
+        # Check against configured IP ranges
+        for pattern in self.target_ip_patterns:
+            if pattern.search(ip_address):
+                return True
+        
+        # If no IP ranges configured, assume any IP could be valid
+        # (geographic detection would need external IP geolocation service)
+        if not self.target_ip_patterns:
+            return True
+        
+        return False

@@ -1,5 +1,5 @@
 """
-Detection modules for TIDAL Stealth Analyzer.
+Detection modules for Stealth Analyzer.
 
 This package contains specialized detectors that analyze parsed log data
 to identify specific types of issues and vulnerabilities.

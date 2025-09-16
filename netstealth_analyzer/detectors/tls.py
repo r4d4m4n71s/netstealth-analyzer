@@ -1,5 +1,5 @@
 """
-TLS fingerprint detector for TIDAL Stealth Analyzer.
+TLS fingerprint detector for NetStealth Analyzer.
 
 This module detects TLS fingerprint issues, certificate problems,
 and handshake failures that could compromise stealth operations.
@@ -122,7 +122,7 @@ class TLSDetector:
                 server_failures[server].append(failure)
             
             for server, failures in server_failures.items():
-                is_tidal = any(failure.get('is_tidal', False) for failure in failures)
+                is_service = any(failure.get('is_service', False) for failure in failures)
                 
                 issue = CriticalIssue(
                     id=f"TLS_HANDSHAKE_FAILED_{server.replace('.', '_').upper()}",
@@ -135,7 +135,7 @@ class TLSDetector:
                     timestamp=datetime.now(),
                     recommendation=issue_config['recommendation'],
                     code_fix=issue_config['code_fix'],
-                    impact_score=issue_config['impact_score'] + (10 if is_tidal else 0),
+                    impact_score=issue_config['impact_score'] + (10 if is_service else 0),
                     raw_data={'failures': failures[:3]}  # Include first 3 failures
                 )
                 issues.append(issue)

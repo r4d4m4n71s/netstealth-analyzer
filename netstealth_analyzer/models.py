@@ -1,5 +1,5 @@
 """
-Data models for TIDAL Stealth Analyzer.
+Data models for Stealth Analyzer.
 
 This module defines the core data structures used throughout the analyzer
 for configuration, results, and reporting.
@@ -139,6 +139,24 @@ class PerformanceMetrics(BaseModel):
     success_rate_percent: float = Field(0, description="Success rate percentage")
 
 
+class TargetGeography(BaseModel):
+    """Target geography configuration for analysis."""
+    
+    country_code: str = Field("US", description="ISO country code (e.g., 'US', 'UK', 'DE')")
+    country_name: str = Field("United States", description="Human-readable country name")
+    ip_ranges: List[str] = Field(default_factory=list, description="Expected IP ranges (CIDR notation)")
+    timezone: str = Field("America/New_York", description="Expected timezone")
+    language: str = Field("en-US", description="Expected language code")
+    
+    @field_validator('country_code')
+    @classmethod
+    def validate_country_code(cls, v: str) -> str:
+        """Validate country code format."""
+        if len(v) != 2 or not v.isupper():
+            raise ValueError("Country code must be 2 uppercase letters (ISO 3166-1 alpha-2)")
+        return v
+
+
 class AnalysisConfig(BaseModel):
     """Configuration for analysis operations."""
     
@@ -151,6 +169,21 @@ class AnalysisConfig(BaseModel):
             "critical_error_detection"
         ],
         description="Core analysis features"
+    )
+    
+    # Service and geography configuration
+    service_domains: List[str] = Field(
+        default_factory=lambda: [
+            "example.com",
+            "api.example.com",
+            "login.example.com",
+            "oauth.example.com"
+        ],
+        description="Target service domains to monitor"
+    )
+    target_geography: TargetGeography = Field(
+        default_factory=TargetGeography,
+        description="Expected geographic location configuration"
     )
     
     # Optional features

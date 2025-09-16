@@ -1,4 +1,4 @@
-"""Browser configuration detector for TIDAL Stealth Analyzer."""
+"""Browser configuration detector for Stealth Analyzer."""
 
 from typing import Any, Dict, List
 from datetime import datetime
