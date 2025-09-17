@@ -93,9 +93,9 @@ def test_parser_imports():
     tests = [
         ("Base Parser", "from netstealth_analyzer.parsers.base import ILogParser, BaseLogParser, ParseResult"),
         ("HAR Parser", "from netstealth_analyzer.parsers.har import HarParser"),
-        ("MitmProxy Parser", "from netstealth_analyzer.parsers.mitmproxy import MitmProxyParser"),
+        ("MitmProxy Parser", "from netstealth_analyzer.parsers.mitmproxy import MitmproxyParser"),
         ("Browser Parser", "from netstealth_analyzer.parsers.browser import BrowserLogParser"),
-        ("POC Parser", "from netstealth_analyzer.parsers.poc import PocParser"),
+        ("POC Parser", "from netstealth_analyzer.parsers.poc import PocExecutionParser"),
     ]
     
     success_count = 0

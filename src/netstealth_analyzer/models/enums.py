@@ -251,6 +251,13 @@ class DetectionConfidence(str, Enum):
             self.VERY_LOW: (0.00, 0.24),
         }[self]
     
+    @property
+    def numeric_value(self) -> float:
+        """Get representative numeric value for this confidence level."""
+        min_val, max_val = self.numeric_range
+        # Return the midpoint of the range
+        return (min_val + max_val) / 2.0
+    
     @classmethod
     def from_score(cls, score: float) -> 'DetectionConfidence':
         """Convert numeric score to confidence level."""

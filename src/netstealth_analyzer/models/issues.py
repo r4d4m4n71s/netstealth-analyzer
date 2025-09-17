@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator, computed_field
+from pydantic import BaseModel, Field, field_validator, computed_field, model_validator
 
 from .enums import SeverityLevel, IssueCategory, DetectionConfidence
 from ..compatibility import override
@@ -284,7 +284,7 @@ class DetectionRule(BaseModel):
     
     # Configuration
     enabled: bool = Field(True, description="Whether rule is active")
-    confidence: float = Field(0.8, ge=0.0, le=1.0, description="Base confidence for matches")
+    confidence: Union[float, DetectionConfidence] = Field(0.8, description="Base confidence for matches")
     max_matches: Optional[int] = Field(None, ge=1, description="Maximum matches per analysis")
     
     # Remediation
@@ -306,6 +306,35 @@ class DetectionRule(BaseModel):
     class Config:
         use_enum_values = True
         validate_assignment = True
+    
+    @field_validator('confidence', mode='before')
+    @classmethod
+    def validate_confidence(cls, v: Union[float, DetectionConfidence]) -> float:
+        """Convert DetectionConfidence enum to numeric value if needed."""
+        if isinstance(v, DetectionConfidence):
+            return v.numeric_value
+        elif isinstance(v, (float, int)):
+            v = float(v)
+            if not (0.0 <= v <= 1.0):
+                raise ValueError("Confidence must be between 0.0 and 1.0")
+            return v
+        elif isinstance(v, str):
+            # Try to convert string to DetectionConfidence enum
+            try:
+                enum_val = DetectionConfidence(v)
+                return enum_val.numeric_value
+            except ValueError:
+                pass
+            # Try to convert string to float
+            try:
+                v = float(v)
+                if not (0.0 <= v <= 1.0):
+                    raise ValueError("Confidence must be between 0.0 and 1.0")
+                return v
+            except ValueError:
+                pass
+        
+        raise ValueError(f"Confidence must be a float or DetectionConfidence enum, got {type(v)}: {v}")
     
     @field_validator('pattern_type')
     @classmethod
