@@ -71,6 +71,12 @@ class AnalysisEvent(Enum):
     PLUGIN_FAILED = auto()              # Plugin failed to load or execute
     PLUGIN_STARTED = auto()             # Plugin started execution
     PLUGIN_COMPLETED = auto()           # Plugin completed execution
+    PLUGIN_EXECUTED = auto()            # Plugin execution completed (alias for PLUGIN_COMPLETED)
+    
+    # === Configuration Events ===
+    CONFIGURATION_CHANGED = auto()      # Configuration was modified
+    CONFIGURATION_LOADED = auto()       # Configuration loaded successfully
+    CONFIGURATION_VALIDATED = auto()    # Configuration validation completed
     
     # === System Events ===
     WARNING_ISSUED = auto()             # Non-fatal warning issued

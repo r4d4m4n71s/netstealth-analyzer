@@ -17,7 +17,7 @@ from enum import Enum, auto
 import logging
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from pydantic import ValidationError as PydanticValidationError
 
 from .core.errors import ConfigurationError, ValidationError, ErrorContext
@@ -62,6 +62,8 @@ class AnalysisMode(str, Enum):
 class LoggingConfig(BaseModel):
     """Configuration for logging system."""
     
+    model_config = ConfigDict(use_enum_values=True)
+    
     level: LogLevel = LogLevel.INFO
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     file_path: Optional[Path] = None
@@ -69,9 +71,6 @@ class LoggingConfig(BaseModel):
     backup_count: int = Field(default=5, ge=1, le=50)
     enable_console: bool = True
     enable_file: bool = False
-    
-    class Config:
-        use_enum_values = True
 
 
 class PerformanceConfig(BaseModel):
@@ -112,8 +111,10 @@ class SecurityConfig(BaseModel):
 class OutputConfig(BaseModel):
     """Configuration for output settings."""
     
+    model_config = ConfigDict(use_enum_values=True)
+    
     mode: OutputMode = OutputMode.CONSOLE
-    directory: Path = Field(default=Path("./output"))
+    directory: Path = Field(default_factory=lambda: Path("./output"))
     filename_template: str = "netstealth_analysis_{timestamp}"
     default_format: ReportFormat = ReportFormat.JSON
     include_raw_data: bool = False
@@ -126,9 +127,6 @@ class OutputConfig(BaseModel):
         path = Path(v) if not isinstance(v, Path) else v
         path.mkdir(parents=True, exist_ok=True)
         return path
-    
-    class Config:
-        use_enum_values = True
 
 
 class FilterConfig(BaseModel):
@@ -193,6 +191,8 @@ class DetectorConfig(BaseModel):
 class PluginConfig(BaseModel):
     """Configuration for plugin system."""
     
+    model_config = ConfigDict(extra="allow")  # Allow extra fields for plugin configuration flexibility
+    
     enable_plugins: bool = True
     plugin_directories: List[Path] = Field(default_factory=lambda: [Path("./plugins")])
     auto_discover: bool = True
@@ -213,13 +213,12 @@ class PluginConfig(BaseModel):
                 path.mkdir(parents=True, exist_ok=True)
             return paths
         return v
-    
-    class Config:
-        extra = "allow"  # Allow extra fields for plugin configuration flexibility
 
 
 class ReportingConfig(BaseModel):
     """Configuration for report generation."""
+    
+    model_config = ConfigDict(use_enum_values=True, extra="allow")  # Allow extra fields for reporting configuration flexibility
     
     default_formats: List[ReportFormat] = Field(default_factory=lambda: [ReportFormat.JSON])
     enable_streaming_reports: bool = True
@@ -237,10 +236,6 @@ class ReportingConfig(BaseModel):
                 path.mkdir(parents=True, exist_ok=True)
             return path
         return v
-    
-    class Config:
-        use_enum_values = True
-        extra = "allow"  # Allow extra fields for reporting configuration flexibility
 
 
 # ============================================================================
@@ -254,6 +249,12 @@ class NetStealthConfig(BaseModel):
     This is the root configuration that contains all component-specific
     configurations and global settings.
     """
+    
+    model_config = ConfigDict(
+        use_enum_values=True, 
+        validate_assignment=True, 
+        extra="forbid"  # Forbid extra fields for strict validation
+    )
     
     # Metadata
     version: str = "2.0.0"
@@ -282,11 +283,6 @@ class NetStealthConfig(BaseModel):
     
     # Custom settings
     custom: Dict[str, Any] = Field(default_factory=dict)
-    
-    class Config:
-        use_enum_values = True
-        validate_assignment = True
-        extra = "forbid"  # Forbid extra fields for strict validation
     
     @model_validator(mode='before')
     @classmethod

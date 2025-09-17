@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union, AsyncIterator
 from uuid import UUID, uuid4
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator, computed_field
+from pydantic import BaseModel, Field, field_validator, computed_field, ConfigDict
 
 from .enums import AnalysisStatus, SeverityLevel, IssueCategory, LogFormat
 from .issues import Issue
@@ -417,6 +417,8 @@ class AnalysisResult(BaseModel):
     Enhanced version with better organization, streaming support, and async capabilities.
     """
     
+    model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
+    
     # Core identification
     result_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique result identifier")
     
@@ -440,10 +442,6 @@ class AnalysisResult(BaseModel):
     # Raw data (if requested)
     raw_log_excerpts: Dict[str, Any] = Field(default_factory=dict, description="Raw log excerpts")
     debug_information: Dict[str, Any] = Field(default_factory=dict, description="Debug information")
-    
-    class Config:
-        use_enum_values = True
-        validate_assignment = True
     
     def add_issue(self, issue: Issue) -> None:
         """Add an issue to the results."""

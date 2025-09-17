@@ -1,0 +1,709 @@
+"""
+Integration tests for ConnectionInfo event-driven workflows.
+
+Tests ConnectionInfo state change events and event-driven connection monitoring.
+"""
+
+import pytest
+import asyncio
+import time
+from typing import List, Dict, Any
+from unittest.mock import Mock, patch
+
+from src.netstealth_analyzer.models.network import (
+    ConnectionInfo, NetworkProtocol, TLSInfo, TLSVersion, NetworkTrace, NetworkHop
+)
+from src.netstealth_analyzer.models.enums import RiskLevel
+from src.netstealth_analyzer.core.events import EventBus, AnalysisEvent, NetworkEvent
+
+
+class TestConnectionInfoEventsIntegration:
+    """Test ConnectionInfo integration with event-driven workflows."""
+    
+    @pytest.mark.asyncio
+    async def test_connection_state_change_events(self, event_bus):
+        """Test ConnectionInfo state changes trigger appropriate events."""
+        events_received = []
+        
+        async def connection_event_listener(event, event_data):
+            events_received.append((event, event_data))
+        
+        # Subscribe to connection-related events
+        event_bus.subscribe(NetworkEvent.CONNECTION_ESTABLISHED, connection_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_QUALITY_DEGRADED, connection_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_TERMINATED, connection_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_SECURITY_ISSUE, connection_event_listener)
+        
+        # Mock connection manager
+        connection_manager = Mock(spec=ConnectionManager)
+        
+        # Create test connection
+        test_connection = ConnectionInfo(
+            protocol=NetworkProtocol.HTTPS,
+            source_ip="192.168.1.100",
+            destination_ip="93.184.216.34",
+            destination_port=443,
+            latency_ms=25.0,
+            duration_ms=150.0,
+            bytes_sent=1024,
+            bytes_received=8192,
+            is_encrypted=True,
+            tls_info=TLSInfo(
+                version=TLSVersion.TLS_12,
+                cipher_suite="TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+            )
+        )
+        
+        # Mock connection manager methods
+        connection_manager.establish_connection = Mock(return_value=test_connection)
+        connection_manager.update_connection_quality = Mock()
+        connection_manager.terminate_connection = Mock()
+        
+        # Simulate connection lifecycle with events
+        
+        # 1. Establish connection
+        connection = await connection_manager.establish_connection(
+            "192.168.1.100", 443, NetworkProtocol.HTTPS
+        )
+        
+        # Simulate event emission
+        await event_bus.emit(NetworkEvent.CONNECTION_ESTABLISHED, {
+            "connection": connection,
+            "timestamp": time.time(),
+            "source_ip": connection.source_ip,
+            "destination_ip": connection.destination_ip,
+            "protocol": connection.protocol.value
+        })
+        
+        # 2. Degrade connection quality
+        await connection_manager.update_connection_quality(
+            connection, latency_ms=500.0, packet_loss_percent=10.0
+        )
+        
+        # Simulate quality degradation event
+        await event_bus.emit(NetworkEvent.CONNECTION_QUALITY_DEGRADED, {
+            "connection": connection,
+            "timestamp": time.time(),
+            "previous_latency": 25.0,
+            "current_latency": 500.0,
+            "packet_loss_percent": 10.0,
+            "quality_score": 0.3
+        })
+        
+        # 3. Security issue detected
+        await event_bus.emit(NetworkEvent.CONNECTION_SECURITY_ISSUE, {
+            "connection": connection,
+            "timestamp": time.time(),
+            "issue_type": "certificate_expired",
+            "severity": "high",
+            "description": "TLS certificate has expired"
+        })
+        
+        # 4. Terminate connection
+        await connection_manager.terminate_connection(connection)
+        
+        # Simulate termination event
+        await event_bus.emit(NetworkEvent.CONNECTION_TERMINATED, {
+            "connection": connection,
+            "timestamp": time.time(),
+            "reason": "user_requested",
+            "duration_ms": connection.duration_ms
+        })
+        
+        # Wait for events to be processed
+        await asyncio.sleep(0.1)
+        
+        # Validate events were received
+        assert len(events_received) >= 4
+        
+        event_types = [event.value if hasattr(event, 'value') else event for event, _ in events_received]
+        assert NetworkEvent.CONNECTION_ESTABLISHED.value in event_types
+        assert NetworkEvent.CONNECTION_QUALITY_DEGRADED.value in event_types
+        assert NetworkEvent.CONNECTION_SECURITY_ISSUE.value in event_types
+        assert NetworkEvent.CONNECTION_TERMINATED.value in event_types
+        
+        # Validate event data
+        for event, event_data in events_received:
+            assert "connection" in event_data
+            assert "timestamp" in event_data
+            assert isinstance(event_data["connection"], ConnectionInfo)
+    
+    @pytest.mark.asyncio
+    async def test_connection_performance_monitoring_events(self, event_bus):
+        """Test connection performance monitoring with event-driven alerts."""
+        performance_events = []
+        
+        async def performance_event_listener(event, event_data):
+            performance_events.append((event, event_data))
+        
+        # Subscribe to performance-related events
+        event_bus.subscribe(NetworkEvent.CONNECTION_SLOW_RESPONSE, performance_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_HIGH_LATENCY, performance_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_PACKET_LOSS, performance_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_TIMEOUT, performance_event_listener)
+        
+        # Mock performance monitor
+        performance_monitor = Mock(spec=ConnectionPerformanceMonitor)
+        
+        # Create connections with various performance issues
+        connections = [
+            # Slow response connection
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTPS,
+                source_ip="192.168.1.100",
+                destination_ip="203.0.113.42",
+                destination_port=443,
+                latency_ms=45.0,
+                duration_ms=5000.0,  # 5 second response time
+                bytes_sent=1024,
+                bytes_received=2048,
+                is_encrypted=True
+            ),
+            # High latency connection
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTPS,
+                source_ip="192.168.1.100",
+                destination_ip="198.51.100.42",
+                destination_port=443,
+                latency_ms=800.0,  # 800ms latency
+                duration_ms=1200.0,
+                bytes_sent=512,
+                bytes_received=4096,
+                is_encrypted=True
+            ),
+            # Packet loss connection
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTP,
+                source_ip="192.168.1.100",
+                destination_ip="10.0.1.50",
+                destination_port=80,
+                latency_ms=150.0,
+                duration_ms=800.0,
+                bytes_sent=2048,
+                bytes_received=1024,  # Less received than sent indicates packet loss
+                packet_loss_percent=12.5,
+                is_encrypted=False
+            ),
+            # Timeout connection
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTPS,
+                source_ip="192.168.1.100",
+                destination_ip="192.0.2.42",
+                destination_port=443,
+                latency_ms=30000.0,  # 30 second timeout
+                duration_ms=30000.0,
+                bytes_sent=1024,
+                bytes_received=0,  # No response received
+                is_encrypted=False  # Failed to establish TLS
+            )
+        ]
+        
+        # Mock performance monitor method
+        performance_monitor.monitor_connections = Mock()
+        
+        # Simulate performance monitoring
+        await performance_monitor.monitor_connections(connections, event_bus)
+        
+        # Simulate performance events based on connection characteristics
+        
+        # Slow response event
+        await event_bus.emit(NetworkEvent.CONNECTION_SLOW_RESPONSE, {
+            "connection": connections[0],
+            "timestamp": time.time(),
+            "response_time_ms": connections[0].duration_ms,
+            "threshold_ms": 2000.0,
+            "severity": "medium"
+        })
+        
+        # High latency event
+        await event_bus.emit(NetworkEvent.CONNECTION_HIGH_LATENCY, {
+            "connection": connections[1],
+            "timestamp": time.time(),
+            "latency_ms": connections[1].latency_ms,
+            "threshold_ms": 500.0,
+            "severity": "high"
+        })
+        
+        # Packet loss event
+        await event_bus.emit(NetworkEvent.CONNECTION_PACKET_LOSS, {
+            "connection": connections[2],
+            "timestamp": time.time(),
+            "packet_loss_percent": connections[2].packet_loss_percent,
+            "threshold_percent": 5.0,
+            "severity": "high"
+        })
+        
+        # Timeout event
+        await event_bus.emit(NetworkEvent.CONNECTION_TIMEOUT, {
+            "connection": connections[3],
+            "timestamp": time.time(),
+            "timeout_ms": connections[3].duration_ms,
+            "expected_timeout_ms": 10000.0,
+            "severity": "critical"
+        })
+        
+        # Wait for events to be processed
+        await asyncio.sleep(0.1)
+        
+        # Validate performance events were received
+        assert len(performance_events) >= 4
+        
+        event_types = [event.value if hasattr(event, 'value') else event for event, _ in performance_events]
+        assert NetworkEvent.CONNECTION_SLOW_RESPONSE.value in event_types
+        assert NetworkEvent.CONNECTION_HIGH_LATENCY.value in event_types
+        assert NetworkEvent.CONNECTION_PACKET_LOSS.value in event_types
+        assert NetworkEvent.CONNECTION_TIMEOUT.value in event_types
+        
+        # Validate event data contains performance metrics
+        for event, event_data in performance_events:
+            assert "connection" in event_data
+            assert "timestamp" in event_data
+            assert "severity" in event_data
+            
+            # Validate specific event data
+            if event == NetworkEvent.CONNECTION_SLOW_RESPONSE:
+                assert "response_time_ms" in event_data
+                assert event_data["response_time_ms"] > event_data["threshold_ms"]
+            elif event == NetworkEvent.CONNECTION_HIGH_LATENCY:
+                assert "latency_ms" in event_data
+                assert event_data["latency_ms"] > event_data["threshold_ms"]
+            elif event == NetworkEvent.CONNECTION_PACKET_LOSS:
+                assert "packet_loss_percent" in event_data
+                assert event_data["packet_loss_percent"] > event_data["threshold_percent"]
+            elif event == NetworkEvent.CONNECTION_TIMEOUT:
+                assert "timeout_ms" in event_data
+                assert event_data["timeout_ms"] > event_data["expected_timeout_ms"]
+    
+    @pytest.mark.asyncio
+    async def test_connection_security_event_workflows(self, event_bus):
+        """Test security-related connection events and automated responses."""
+        security_events = []
+        automated_responses = []
+        
+        async def security_event_listener(event, event_data):
+            security_events.append((event, event_data))
+        
+        async def automated_response_handler(event, event_data):
+            # Simulate automated security response
+            if event == NetworkEvent.CONNECTION_SECURITY_ISSUE:
+                response = {
+                    "action": "block_connection",
+                    "connection_id": f"{event_data['connection'].source_ip}:{event_data['connection'].destination_ip}",
+                    "timestamp": time.time(),
+                    "reason": event_data.get("issue_type", "security_violation")
+                }
+                automated_responses.append(response)
+        
+        # Subscribe to security events
+        event_bus.subscribe(NetworkEvent.CONNECTION_SECURITY_ISSUE, security_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_INSECURE_PROTOCOL, security_event_listener)
+        event_bus.subscribe(NetworkEvent.CONNECTION_CERTIFICATE_ERROR, security_event_listener)
+        
+        # Subscribe automated response handler
+        event_bus.subscribe(NetworkEvent.CONNECTION_SECURITY_ISSUE, automated_response_handler)
+        
+        # Mock security monitor
+        security_monitor = Mock(spec=ConnectionSecurityMonitor)
+        
+        # Create connections with security issues
+        security_connections = [
+            # Insecure HTTP connection
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTP,
+                source_ip="192.168.1.100",
+                destination_ip="10.0.1.50",
+                destination_port=80,
+                latency_ms=50.0,
+                duration_ms=200.0,
+                bytes_sent=1024,
+                bytes_received=4096,
+                is_encrypted=False,
+                tls_info=None
+            ),
+            # HTTPS with certificate issues
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTPS,
+                source_ip="192.168.1.100",
+                destination_ip="203.0.113.42",
+                destination_port=443,
+                latency_ms=75.0,
+                duration_ms=300.0,
+                bytes_sent=2048,
+                bytes_received=8192,
+                is_encrypted=True,
+                tls_info=TLSInfo(
+                    version=TLSVersion.TLS_10,  # Deprecated version
+                    cipher_suite="TLS_RSA_WITH_RC4_128_SHA",  # Weak cipher
+                    certificate_issues=["expired_certificate", "self_signed"],
+                    certificate_expiry_days=-15
+                )
+            ),
+            # HTTPS with weak TLS configuration
+            ConnectionInfo(
+                protocol=NetworkProtocol.HTTPS,
+                source_ip="192.168.1.100",
+                destination_ip="198.51.100.42",
+                destination_port=443,
+                latency_ms=100.0,
+                duration_ms=400.0,
+                bytes_sent=1024,
+                bytes_received=2048,
+                is_encrypted=True,
+                tls_info=TLSInfo(
+                    version=TLSVersion.TLS_11,  # Deprecated version
+                    cipher_suite="TLS_RSA_WITH_AES_128_CBC_SHA",  # No PFS
+                    certificate_issues=["weak_signature"],
+                    supports_perfect_forward_secrecy=False
+                )
+            )
+        ]
+        
+        # Mock security monitor method
+        security_monitor.monitor_security = Mock()
+        
+        # Simulate security monitoring
+        await security_monitor.monitor_security(security_connections, event_bus)
+        
+        # Simulate security events
+        
+        # Insecure protocol event
+        await event_bus.emit(NetworkEvent.CONNECTION_INSECURE_PROTOCOL, {
+            "connection": security_connections[0],
+            "timestamp": time.time(),
+            "protocol": "HTTP",
+            "risk_level": "high",
+            "recommendation": "Upgrade to HTTPS"
+        })
+        
+        # Certificate error event
+        await event_bus.emit(NetworkEvent.CONNECTION_CERTIFICATE_ERROR, {
+            "connection": security_connections[1],
+            "timestamp": time.time(),
+            "certificate_issues": ["expired_certificate", "self_signed"],
+            "expiry_days": -15,
+            "severity": "critical"
+        })
+        
+        # General security issue event
+        await event_bus.emit(NetworkEvent.CONNECTION_SECURITY_ISSUE, {
+            "connection": security_connections[2],
+            "timestamp": time.time(),
+            "issue_type": "weak_tls_configuration",
+            "details": "TLS 1.1 with weak cipher suite",
+            "severity": "medium"
+        })
+        
+        # Wait for events and automated responses
+        await asyncio.sleep(0.1)
+        
+        # Validate security events were received
+        assert len(security_events) >= 3
+        
+        event_types = [event.value if hasattr(event, 'value') else event for event, _ in security_events]
+        assert NetworkEvent.CONNECTION_INSECURE_PROTOCOL.value in event_types
+        assert NetworkEvent.CONNECTION_CERTIFICATE_ERROR.value in event_types
+        assert NetworkEvent.CONNECTION_SECURITY_ISSUE.value in event_types
+        
+        # Validate automated responses were triggered
+        assert len(automated_responses) >= 1
+        
+        for response in automated_responses:
+            assert "action" in response
+            assert "connection_id" in response
+            assert "timestamp" in response
+            assert "reason" in response
+            assert response["action"] == "block_connection"
+        
+        # Validate event data contains security information
+        for event, event_data in security_events:
+            assert "connection" in event_data
+            assert "timestamp" in event_data
+            
+            if event == NetworkEvent.CONNECTION_INSECURE_PROTOCOL:
+                assert "protocol" in event_data
+                assert "risk_level" in event_data
+                assert "recommendation" in event_data
+            elif event == NetworkEvent.CONNECTION_CERTIFICATE_ERROR:
+                assert "certificate_issues" in event_data
+                assert "severity" in event_data
+            elif event == NetworkEvent.CONNECTION_SECURITY_ISSUE:
+                assert "issue_type" in event_data
+                assert "severity" in event_data
+    
+    @pytest.mark.asyncio
+    async def test_connection_lifecycle_event_correlation(self, event_bus):
+        """Test correlation of connection events throughout the connection lifecycle."""
+        lifecycle_events = []
+        event_correlations = {}
+        
+        async def lifecycle_event_listener(event, event_data):
+            lifecycle_events.append((event, event_data))
+            
+            # Track event correlations by connection
+            connection_id = f"{event_data['connection'].source_ip}:{event_data['connection'].destination_ip}"
+            if connection_id not in event_correlations:
+                event_correlations[connection_id] = []
+            event_correlations[connection_id].append((event, event_data))
+        
+        # Subscribe to all connection lifecycle events
+        lifecycle_event_types = [
+            NetworkEvent.CONNECTION_ESTABLISHED,
+            NetworkEvent.CONNECTION_QUALITY_DEGRADED,
+            NetworkEvent.CONNECTION_QUALITY_IMPROVED,
+            NetworkEvent.CONNECTION_SECURITY_ISSUE,
+            NetworkEvent.CONNECTION_TERMINATED
+        ]
+        
+        for event_type in lifecycle_event_types:
+            event_bus.subscribe(event_type, lifecycle_event_listener)
+        
+        # Mock connection lifecycle manager
+        lifecycle_manager = Mock(spec=ConnectionLifecycleManager)
+        
+        # Create test connection
+        test_connection = ConnectionInfo(
+            protocol=NetworkProtocol.HTTPS,
+            source_ip="192.168.1.100",
+            destination_ip="93.184.216.34",
+            destination_port=443,
+            latency_ms=30.0,
+            duration_ms=120.0,
+            bytes_sent=2048,
+            bytes_received=16384,
+            is_encrypted=True,
+            tls_info=TLSInfo(
+                version=TLSVersion.TLS_13,
+                cipher_suite="TLS_AES_256_GCM_SHA384"
+            )
+        )
+        
+        # Mock lifecycle manager method
+        lifecycle_manager.manage_connection_lifecycle = Mock()
+        
+        # Simulate complete connection lifecycle
+        await lifecycle_manager.manage_connection_lifecycle(test_connection, event_bus)
+        
+        # Simulate lifecycle events in sequence
+        base_time = time.time()
+        
+        # 1. Connection established
+        await event_bus.emit(NetworkEvent.CONNECTION_ESTABLISHED, {
+            "connection": test_connection,
+            "timestamp": base_time,
+            "establishment_time_ms": 50.0,
+            "tls_handshake_time_ms": 25.0
+        })
+        
+        # 2. Quality degradation
+        await event_bus.emit(NetworkEvent.CONNECTION_QUALITY_DEGRADED, {
+            "connection": test_connection,
+            "timestamp": base_time + 10,
+            "previous_latency": 30.0,
+            "current_latency": 200.0,
+            "degradation_factor": 6.67
+        })
+        
+        # 3. Security issue detected
+        await event_bus.emit(NetworkEvent.CONNECTION_SECURITY_ISSUE, {
+            "connection": test_connection,
+            "timestamp": base_time + 15,
+            "issue_type": "certificate_warning",
+            "severity": "low",
+            "auto_resolved": True
+        })
+        
+        # 4. Quality improvement
+        await event_bus.emit(NetworkEvent.CONNECTION_QUALITY_IMPROVED, {
+            "connection": test_connection,
+            "timestamp": base_time + 25,
+            "previous_latency": 200.0,
+            "current_latency": 35.0,
+            "improvement_factor": 5.71
+        })
+        
+        # 5. Connection terminated
+        await event_bus.emit(NetworkEvent.CONNECTION_TERMINATED, {
+            "connection": test_connection,
+            "timestamp": base_time + 30,
+            "total_duration_ms": test_connection.duration_ms,
+            "termination_reason": "completed_successfully"
+        })
+        
+        # Wait for all events to be processed
+        await asyncio.sleep(0.1)
+        
+        # Validate lifecycle events were received
+        assert len(lifecycle_events) >= 5
+        
+        # Validate event correlation
+        connection_id = f"{test_connection.source_ip}:{test_connection.destination_ip}"
+        assert connection_id in event_correlations
+        
+        correlated_events = event_correlations[connection_id]
+        assert len(correlated_events) >= 5
+        
+        # Validate event sequence
+        event_sequence = [event.value if hasattr(event, 'value') else event for event, _ in correlated_events]
+        expected_sequence = [
+            NetworkEvent.CONNECTION_ESTABLISHED.value,
+            NetworkEvent.CONNECTION_QUALITY_DEGRADED.value,
+            NetworkEvent.CONNECTION_SECURITY_ISSUE.value,
+            NetworkEvent.CONNECTION_QUALITY_IMPROVED.value,
+            NetworkEvent.CONNECTION_TERMINATED.value
+        ]
+        
+        for expected_event in expected_sequence:
+            assert expected_event in event_sequence
+        
+        # Validate event timing correlation
+        event_times = [event_data["timestamp"] for _, event_data in correlated_events]
+        assert event_times == sorted(event_times)  # Events should be in chronological order
+        
+        # Validate connection consistency across events
+        for event, event_data in correlated_events:
+            assert event_data["connection"] == test_connection
+            assert "timestamp" in event_data
+    
+    @pytest.mark.asyncio
+    async def test_event_driven_connection_analytics(self, event_bus):
+        """Test event-driven connection analytics and insights generation."""
+        analytics_events = []
+        generated_insights = []
+        
+        async def analytics_event_listener(event, event_data):
+            analytics_events.append((event, event_data))
+        
+        async def insights_generator(event, event_data):
+            # Generate insights based on connection events
+            if event == AnalysisEvent.ANALYSIS_COMPLETED:
+                insights = {
+                    "timestamp": time.time(),
+                    "total_connections": event_data.get("connections_analyzed", 0),
+                    "performance_insights": [
+                        "Average latency increased by 15% compared to baseline",
+                        "3 connections experienced packet loss >5%",
+                        "TLS 1.3 connections show 25% better performance"
+                    ],
+                    "security_insights": [
+                        "2 connections using deprecated TLS versions",
+                        "1 certificate expiring within 30 days",
+                        "HTTP connections represent 20% of total traffic"
+                    ],
+                    "recommendations": [
+                        "Upgrade deprecated TLS configurations",
+                        "Implement connection pooling for high-latency endpoints",
+                        "Monitor certificate expiration dates proactively"
+                    ]
+                }
+                generated_insights.append(insights)
+        
+        # Subscribe to analytics events
+        event_bus.subscribe(AnalysisEvent.ANALYSIS_STARTED, analytics_event_listener)
+        event_bus.subscribe(AnalysisEvent.ANALYSIS_COMPLETED, analytics_event_listener)
+        event_bus.subscribe(AnalysisEvent.ANALYSIS_COMPLETED, insights_generator)
+        
+        # Mock connection analytics engine
+        analytics_engine = Mock(spec=ConnectionAnalyticsEngine)
+        
+        # Create diverse connection dataset for analytics
+        analytics_connections = [
+            ConnectionInfo(protocol=NetworkProtocol.HTTPS, latency_ms=25.0, is_encrypted=True),
+            ConnectionInfo(protocol=NetworkProtocol.HTTPS, latency_ms=150.0, is_encrypted=True),
+            ConnectionInfo(protocol=NetworkProtocol.HTTP, latency_ms=75.0, is_encrypted=False),
+            ConnectionInfo(protocol=NetworkProtocol.HTTPS, latency_ms=300.0, packet_loss_percent=8.0, is_encrypted=True),
+            ConnectionInfo(protocol=NetworkProtocol.HTTP, latency_ms=45.0, is_encrypted=False)
+        ]
+        
+        # Mock analytics engine method
+        analytics_engine.analyze_connections = Mock()
+        
+        # Simulate analytics workflow
+        await analytics_engine.analyze_connections(analytics_connections, event_bus)
+        
+        # Simulate analytics events
+        await event_bus.emit(AnalysisEvent.ANALYSIS_STARTED, {
+            "timestamp": time.time(),
+            "connections_to_analyze": len(analytics_connections),
+            "analysis_type": "comprehensive_connection_analytics"
+        })
+        
+        # Simulate analysis completion
+        await event_bus.emit(AnalysisEvent.ANALYSIS_COMPLETED, {
+            "timestamp": time.time(),
+            "connections_analyzed": len(analytics_connections),
+            "analysis_duration_ms": 1500.0,
+            "insights_generated": True
+        })
+        
+        # Wait for events and insights generation
+        await asyncio.sleep(0.1)
+        
+        # Validate analytics events were received
+        assert len(analytics_events) >= 2
+        
+        event_types = [event.value if hasattr(event, 'value') else event for event, _ in analytics_events]
+        assert AnalysisEvent.ANALYSIS_STARTED.value in event_types
+        assert AnalysisEvent.ANALYSIS_COMPLETED.value in event_types
+        
+        # Validate insights were generated
+        assert len(generated_insights) >= 1
+        
+        insights = generated_insights[0]
+        assert "timestamp" in insights
+        assert "total_connections" in insights
+        assert "performance_insights" in insights
+        assert "security_insights" in insights
+        assert "recommendations" in insights
+        
+        # Validate insights content
+        assert len(insights["performance_insights"]) >= 2
+        assert len(insights["security_insights"]) >= 2
+        assert len(insights["recommendations"]) >= 2
+        
+        # Validate insights contain relevant information
+        insights_text = " ".join(
+            insights["performance_insights"] + 
+            insights["security_insights"] + 
+            insights["recommendations"]
+        ).lower()
+        
+        assert "latency" in insights_text
+        assert "tls" in insights_text
+        assert "connection" in insights_text
+
+
+# Mock classes for testing
+class ConnectionManager:
+    """Mock connection manager."""
+    async def establish_connection(self, source_ip: str, port: int, protocol: NetworkProtocol) -> ConnectionInfo:
+        pass
+    
+    async def update_connection_quality(self, connection: ConnectionInfo, **kwargs):
+        pass
+    
+    async def terminate_connection(self, connection: ConnectionInfo):
+        pass
+
+
+class ConnectionPerformanceMonitor:
+    """Mock connection performance monitor."""
+    async def monitor_connections(self, connections: List[ConnectionInfo], event_bus: EventBus):
+        pass
+
+
+class ConnectionSecurityMonitor:
+    """Mock connection security monitor."""
+    async def monitor_security(self, connections: List[ConnectionInfo], event_bus: EventBus):
+        pass
+
+
+class ConnectionLifecycleManager:
+    """Mock connection lifecycle manager."""
+    async def manage_connection_lifecycle(self, connection: ConnectionInfo, event_bus: EventBus):
+        pass
+
+
+class ConnectionAnalyticsEngine:
+    """Mock connection analytics engine."""
+    async def analyze_connections(self, connections: List[ConnectionInfo], event_bus: EventBus):
+        pass

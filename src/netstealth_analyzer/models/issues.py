@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator, computed_field, model_validator
+from pydantic import BaseModel, Field, field_validator, computed_field, model_validator, ConfigDict
 
 from .enums import SeverityLevel, IssueCategory, DetectionConfidence
 from ..compatibility import override
@@ -138,6 +138,8 @@ class Issue(BaseModel):
     evidence tracking, and remediation support.
     """
     
+    model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
+    
     # Core identification
     id: str = Field(default_factory=lambda: str(uuid4()), description="Unique issue identifier")
     category: IssueCategory = Field(..., description="Issue category")
@@ -177,10 +179,6 @@ class Issue(BaseModel):
     
     # Raw data (for debugging and analysis)
     raw_data: Dict[str, Any] = Field(default_factory=dict, description="Raw detection data")
-    
-    class Config:
-        use_enum_values = True
-        validate_assignment = True
     
     @computed_field
     @property
@@ -264,6 +262,8 @@ class DetectionRule(BaseModel):
     Enhanced version with better pattern matching and metadata support.
     """
     
+    model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
+    
     # Core identification
     id: str = Field(..., description="Unique rule identifier")
     name: str = Field(..., description="Human-readable rule name")
@@ -308,10 +308,6 @@ class DetectionRule(BaseModel):
         description="Rule creation timestamp"
     )
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
-    
-    class Config:
-        use_enum_values = True
-        validate_assignment = True
     
     @field_validator('confidence', mode='before')
     @classmethod
