@@ -203,10 +203,10 @@ class EventSubscription:
         if not self.is_active:
             return
         
+        self.call_count += 1
+        self.last_called_at = datetime.now(timezone.utc)
+        
         try:
-            self.call_count += 1
-            self.last_called_at = datetime.now(timezone.utc)
-            
             await self.handler(event, data)
             
             if self.once:
@@ -217,7 +217,8 @@ class EventSubscription:
                 f"Error in event handler {self.subscription_id}: {e}",
                 exc_info=True
             )
-            # Don't re-raise to prevent one bad handler from breaking others
+            # Re-raise to let the EventBus handle the error counting
+            raise
     
     def unsubscribe(self) -> None:
         """Deactivate this subscription."""
@@ -274,7 +275,7 @@ class EventBus:
         self._subscriptions.append(subscription)
         
         logger.debug(
-            f"Subscribed to events {events} with handler {handler.__name__}"
+            f"Subscribed to events {events} with handler {getattr(handler, '__name__', 'anonymous')}"
         )
         
         return subscription
@@ -311,7 +312,9 @@ class EventBus:
         subscriptions_to_remove = []
         
         for subscription in self._subscriptions:
-            if handler is None or subscription.handler == handler:
+            # Compare the original handler, not the wrapped async version
+            original_handler = getattr(subscription.handler, '__wrapped__', subscription.handler)
+            if handler is None or original_handler == handler or subscription.handler == handler:
                 subscription.unsubscribe()
                 subscriptions_to_remove.append(subscription)
                 removed += 1
@@ -341,7 +344,7 @@ class EventBus:
             
             # Add to history
             self._event_history.append((event, data, datetime.now(timezone.utc)))
-            if len(self._event_history) > self._max_history:
+            while len(self._event_history) > self._max_history:
                 self._event_history.pop(0)
         
         # Find matching subscriptions

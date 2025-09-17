@@ -254,7 +254,7 @@ class Issue(BaseModel):
     
     def __str__(self) -> str:
         """String representation of issue."""
-        return f"{self.severity.value.upper()}: {self.display_title} (confidence: {self.confidence:.2f})"
+        return f"{self.severity.upper()}: {self.display_title} (confidence: {self.confidence:.2f})"
 
 
 class DetectionRule(BaseModel):

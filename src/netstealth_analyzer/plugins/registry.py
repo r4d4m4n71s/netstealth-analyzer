@@ -298,7 +298,11 @@ class PluginRegistry:
         plugin_class = self._plugin_classes[plugin_name]
         
         try:
-            plugin = plugin_class(config)
+            # Try to create plugin with config parameter
+            if config is not None:
+                plugin = plugin_class(config=config)
+            else:
+                plugin = plugin_class()
             return plugin
         except Exception as e:
             raise PluginError(f"Failed to create plugin instance '{plugin_name}': {e}")

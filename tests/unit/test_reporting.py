@@ -8,7 +8,7 @@ with full Python 3.13 compatibility validation.
 import asyncio
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -82,7 +82,7 @@ class TestReport:
         """Test report properties."""
         issues = [sample_issue]
         start_time = datetime.now(timezone.utc)
-        end_time = start_time.replace(second=start_time.second + 5)
+        end_time = start_time + timedelta(seconds=5)
         
         report = Report(
             issues=issues,
@@ -181,7 +181,7 @@ class TestReport:
         
         issues = generate_test_issues(3)
         start_time = datetime.now(timezone.utc)
-        end_time = start_time.replace(second=start_time.second + 10)
+        end_time = start_time + timedelta(seconds=10)
         statistics = {"processed": 100}
         
         report = Report(
@@ -241,7 +241,7 @@ class TestReport:
         
         issues = generate_test_issues(3)
         start_time = datetime.now(timezone.utc)
-        end_time = start_time.replace(second=start_time.second + 5)
+        end_time = start_time + timedelta(seconds=5)
         
         report = Report(
             issues=issues,
@@ -510,7 +510,7 @@ class TestMarkdownFormatter:
         formatter = MarkdownFormatter()
         issues = generate_test_issues(3)
         start_time = datetime.now(timezone.utc)
-        end_time = start_time.replace(second=start_time.second + 10)
+        end_time = start_time + timedelta(seconds=10)
         
         report = Report(
             issues=issues,
