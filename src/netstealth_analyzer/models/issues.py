@@ -201,7 +201,13 @@ class Issue(BaseModel):
     @property
     def display_title(self) -> str:
         """Get display-friendly title with category."""
-        return f"[{self.category.display_name}] {self.title}"
+        if hasattr(self.category, 'display_name'):
+            category_name = self.category.display_name
+        elif hasattr(self.category, 'value'):
+            category_name = self.category.value.replace('_', ' ').title()
+        else:
+            category_name = str(self.category).replace('_', ' ').title()
+        return f"[{category_name}] {self.title}"
     
     @field_validator('status')
     @classmethod

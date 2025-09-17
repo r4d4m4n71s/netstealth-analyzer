@@ -51,25 +51,29 @@ class JsonFormatter(ReportFormatter):
     
     def _format_issue(self, issue: Issue) -> Dict[str, Any]:
         """Format a single issue for JSON output."""
+        # Handle enum values safely
+        category_value = issue.category.value if hasattr(issue.category, 'value') else str(issue.category)
+        severity_value = issue.severity.value if hasattr(issue.severity, 'value') else str(issue.severity)
+        
         return {
             'id': issue.id,
             'title': issue.title,
             'description': issue.description,
-            'category': issue.category.value,
-            'severity': issue.severity.value,
+            'category': category_value,
+            'severity': severity_value,
             'confidence': issue.confidence,
-            'timestamp': issue.timestamp.isoformat() if issue.timestamp else None,
+            'timestamp': issue.detection_timestamp.isoformat() if issue.detection_timestamp else None,
             'evidence': [
                 {
-                    'type': evidence.evidence_type,
+                    'type': evidence.type,
                     'description': evidence.description,
-                    'data': evidence.data,
+                    'data': evidence.raw_data,
                     'metadata': evidence.metadata
                 }
                 for evidence in issue.evidence
             ],
-            'remediation_suggestions': issue.remediation_suggestions,
-            'metadata': issue.metadata
+            'remediation_suggestions': [r.title for r in issue.remediation_suggestions],
+            'metadata': issue.metadata.model_dump() if hasattr(issue.metadata, 'model_dump') else issue.metadata
         }
 
 
@@ -166,10 +170,12 @@ class MarkdownFormatter(ReportFormatter):
             if issues:
                 sections.append(f"### {title}")
                 for issue in issues:
-                    sections.append(f"- **{issue.title}** ({issue.category.value})")
+                    category_value = issue.category.value if hasattr(issue.category, 'value') else str(issue.category)
+                    sections.append(f"- **{issue.title}** ({category_value})")
                     sections.append(f"  - Confidence: {issue.confidence:.1%}")
                     if issue.remediation_suggestions:
-                        sections.append(f"  - Remediation: {issue.remediation_suggestions[0]}")
+                        remediation = issue.remediation_suggestions[0].title if hasattr(issue.remediation_suggestions[0], 'title') else str(issue.remediation_suggestions[0])
+                        sections.append(f"  - Remediation: {remediation}")
         
         return '\n\n'.join(sections)
     
@@ -195,10 +201,13 @@ class MarkdownFormatter(ReportFormatter):
             SeverityLevel.INFO: "ℹ️"
         }.get(issue.severity, "❓")
         
+        category_value = issue.category.value if hasattr(issue.category, 'value') else str(issue.category)
+        severity_value = issue.severity.value if hasattr(issue.severity, 'value') else str(issue.severity)
+        
         sections = [
             f"### {severity_emoji} Issue #{index}: {issue.title}",
-            f"**Category**: {issue.category.value}  ",
-            f"**Severity**: {issue.severity.value}  ",
+            f"**Category**: {category_value}  ",
+            f"**Severity**: {severity_value}  ",
             f"**Confidence**: {issue.confidence:.1%}  ",
             f"**Description**: {issue.description}"
         ]
@@ -206,7 +215,7 @@ class MarkdownFormatter(ReportFormatter):
         if issue.evidence:
             sections.append("**Evidence**:")
             for evidence in issue.evidence:
-                sections.append(f"- {evidence.description}: `{evidence.data}`")
+                sections.append(f"- {evidence.description}: `{evidence.raw_data}`")
         
         if issue.remediation_suggestions:
             sections.append("**Remediation Suggestions**:")
@@ -384,12 +393,14 @@ class HtmlFormatter(ReportFormatter):
         issues_html = ['<div class="summary-card"><h2>📝 Issues</h2>']
         
         for i, issue in enumerate(report.issues, 1):
-            severity_class = issue.severity.value.lower()
+            severity_value = issue.severity.value if hasattr(issue.severity, 'value') else str(issue.severity)
+            category_value = issue.category.value if hasattr(issue.category, 'value') else str(issue.category)
+            severity_class = severity_value.lower()
             issues_html.append(f'''
             <div class="issue-card {severity_class}">
                 <h3>Issue #{i}: {issue.title}</h3>
-                <p><strong>Category:</strong> {issue.category.value}</p>
-                <p><strong>Severity:</strong> {issue.severity.value}</p>
+                <p><strong>Category:</strong> {category_value}</p>
+                <p><strong>Severity:</strong> {severity_value}</p>
                 <p><strong>Confidence:</strong> {issue.confidence:.1%}</p>
                 <p>{issue.description}</p>
                 
@@ -407,7 +418,7 @@ class HtmlFormatter(ReportFormatter):
         
         html = ['<div class="evidence"><strong>Evidence:</strong><ul>']
         for evidence in evidence_list:
-            html.append(f'<li>{evidence.description}: <code>{evidence.data}</code></li>')
+            html.append(f'<li>{evidence.description}: <code>{evidence.raw_data}</code></li>')
         html.append('</ul></div>')
         return '\n'.join(html)
     

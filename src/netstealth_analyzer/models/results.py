@@ -368,7 +368,10 @@ class AnalysisSummary(BaseModel):
                 self.info_issues_count += 1
             
             # Count by category
-            category = issue.category.value
+            if hasattr(issue.category, 'value'):
+                category = issue.category.value
+            else:
+                category = str(issue.category)
             self.issues_by_category[category] = self.issues_by_category.get(category, 0) + 1
         
         # Update overall score based on issues

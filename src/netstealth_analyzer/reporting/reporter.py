@@ -40,10 +40,10 @@ class IncrementalReporter:
     
     def _setup_event_handlers(self) -> None:
         """Set up event handlers for analysis events."""
-        self.event_bus.subscribe(AnalysisEvent.STARTED, self._on_analysis_started)
+        self.event_bus.subscribe(AnalysisEvent.ANALYSIS_STARTED, self._on_analysis_started)
         self.event_bus.subscribe(AnalysisEvent.ISSUE_FOUND, self._on_issue_found)
-        self.event_bus.subscribe(AnalysisEvent.COMPLETED, self._on_analysis_completed)
-        self.event_bus.subscribe(AnalysisEvent.PROGRESS, self._on_progress_update)
+        self.event_bus.subscribe(AnalysisEvent.ANALYSIS_COMPLETED, self._on_analysis_completed)
+        self.event_bus.subscribe(AnalysisEvent.PROGRESS_UPDATE, self._on_progress_update)
     
     async def _on_analysis_started(self, data: Dict[str, Any]) -> None:
         """Handle analysis started event."""
@@ -137,10 +137,10 @@ class Report:
         if analysis_result:
             # Initialize from AnalysisResult
             self.issues = analysis_result.issues
-            self.statistics = analysis_result.statistics
-            self.start_time = analysis_result.analysis_start_time
-            self.end_time = analysis_result.analysis_end_time
-            self.config = analysis_result.configuration
+            self.statistics = analysis_result.processing_stats.get_performance_summary() if analysis_result.processing_stats else {}
+            self.start_time = analysis_result.execution_context.start_time
+            self.end_time = analysis_result.execution_context.end_time
+            self.config = analysis_result.execution_context.configuration_summary
         else:
             # Initialize from individual parameters
             self.issues = issues or []
@@ -209,7 +209,11 @@ class Report:
         """Get distribution of issues by category."""
         distribution = {}
         for issue in self.issues:
-            category_name = issue.category.value
+            # Handle both enum and string categories
+            if hasattr(issue.category, 'value'):
+                category_name = issue.category.value
+            else:
+                category_name = str(issue.category)
             distribution[category_name] = distribution.get(category_name, 0) + 1
         return distribution
     
@@ -262,8 +266,9 @@ class Report:
     
     def to_json(self, indent: int = 2) -> str:
         """Convert report to JSON string."""
-        import json
-        return json.dumps(self.to_dict(), indent=indent, default=str)
+        from .formats import JsonFormatter
+        formatter = JsonFormatter(indent=indent)
+        return formatter.format(self)
     
     def to_markdown(self) -> str:
         """Convert report to Markdown format."""
