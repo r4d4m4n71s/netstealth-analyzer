@@ -6,7 +6,7 @@ suggestions with enhanced metadata and evidence tracking.
 
 Author: NetStealth Analyzer Team
 Version: 2.0.0
-Python: 3.11+
+Python: 3.13+
 """
 
 from datetime import datetime, timezone
@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 from pathlib import Path
 
-from pydantic import BaseModel, Field, validator, computed_field
+from pydantic import BaseModel, Field, field_validator, computed_field
 
 from .enums import SeverityLevel, IssueCategory, DetectionConfidence
 from ..compatibility import override
@@ -31,7 +31,8 @@ class IssueLocation(BaseModel):
     request_id: Optional[str] = Field(None, description="Request identifier")
     timestamp: Optional[datetime] = Field(None, description="When issue occurred")
     
-    @validator('file_path', pre=True)
+    @field_validator('file_path', mode='before')
+    @classmethod
     def validate_file_path(cls, v):
         if v is not None and not isinstance(v, Path):
             return Path(v)
@@ -114,14 +115,16 @@ class RemediationSuggestion(BaseModel):
     side_effects: List[str] = Field(default_factory=list, description="Potential side effects")
     rollback_plan: Optional[str] = Field(None, description="Plan for rolling back fix")
     
-    @validator('effort_level')
-    def validate_effort_level(cls, v):
+    @field_validator('effort_level')
+    @classmethod
+    def validate_effort_level(cls, v: str) -> str:
         if v not in ['low', 'medium', 'high']:
             raise ValueError("Effort level must be 'low', 'medium', or 'high'")
         return v
     
-    @validator('risk_level')
-    def validate_risk_level(cls, v):
+    @field_validator('risk_level')
+    @classmethod
+    def validate_risk_level(cls, v: str) -> str:
         if v not in ['low', 'medium', 'high', 'critical']:
             raise ValueError("Risk level must be 'low', 'medium', 'high', or 'critical'")
         return v
@@ -200,8 +203,9 @@ class Issue(BaseModel):
         """Get display-friendly title with category."""
         return f"[{self.category.display_name}] {self.title}"
     
-    @validator('status')
-    def validate_status(cls, v):
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v: str) -> str:
         allowed_statuses = ['open', 'investigating', 'resolved', 'false_positive', 'wont_fix']
         if v not in allowed_statuses:
             raise ValueError(f"Status must be one of: {allowed_statuses}")
@@ -303,8 +307,9 @@ class DetectionRule(BaseModel):
         use_enum_values = True
         validate_assignment = True
     
-    @validator('pattern_type')
-    def validate_pattern_type(cls, v):
+    @field_validator('pattern_type')
+    @classmethod
+    def validate_pattern_type(cls, v: str) -> str:
         allowed_types = ['regex', 'string', 'xpath', 'jsonpath', 'custom']
         if v not in allowed_types:
             raise ValueError(f"Pattern type must be one of: {allowed_types}")

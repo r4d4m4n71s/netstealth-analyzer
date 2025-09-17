@@ -16,8 +16,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Security",
     "Topic :: System :: Networking",
@@ -26,7 +24,7 @@ classifiers = [
 packages = [{include = "netstealth_analyzer", from = "src"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.13"
 pydantic = "^2.5"
 aiofiles = "^23.2"
 pyyaml = "^6.0"
@@ -63,7 +61,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
-target-version = ['py311']
+target-version = ['py313']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -80,7 +78,7 @@ extend-exclude = '''
 '''
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py313"
 line-length = 88
 select = [
     "E",  # pycodestyle errors
@@ -101,7 +99,7 @@ ignore = [
 "__init__.py" = ["F401"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true

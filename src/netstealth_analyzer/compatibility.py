@@ -1,12 +1,13 @@
 """
 Python version compatibility layer for NetStealth Analyzer.
 
-This module provides feature detection and polyfills for different Python versions
-(3.11, 3.12, 3.13+) to ensure consistent behavior across supported versions.
+This module provides feature detection and optimizations for Python 3.13+.
+Since this is a new project, we target Python 3.13 as the minimum requirement
+and leverage its latest features for optimal performance.
 
 Author: NetStealth Analyzer Team
 Version: 2.0.0
-Python: 3.11+
+Python: 3.13+
 """
 
 import sys
@@ -300,7 +301,7 @@ def has_feature(feature_name: str) -> bool:
         feature_name: Name of the feature to check
         
     Returns:
-        True if feature is available
+        True if feature is available, False otherwise
     """
     features = FeatureDetector.get_feature_summary()
     return features.get(feature_name, False)
@@ -314,7 +315,7 @@ def initialize_compatibility() -> None:
         CompatibilityError: If environment is incompatible
     """
     # Ensure minimum Python version
-    require_python_version(3, 11)
+    require_python_version(3, 13)
     
     # Log feature availability
     features = FeatureDetector.get_feature_summary()

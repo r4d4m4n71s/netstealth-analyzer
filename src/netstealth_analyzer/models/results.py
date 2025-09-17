@@ -6,7 +6,7 @@ execution context with enhanced async support and streaming capabilities.
 
 Author: NetStealth Analyzer Team
 Version: 2.0.0
-Python: 3.11+
+Python: 3.13+
 """
 
 from datetime import datetime, timezone
@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union, AsyncIterator
 from uuid import UUID, uuid4
 from pathlib import Path
 
-from pydantic import BaseModel, Field, validator, computed_field
+from pydantic import BaseModel, Field, field_validator, computed_field
 
 from .enums import AnalysisStatus, SeverityLevel, IssueCategory, LogFormat
 from .issues import Issue
@@ -230,7 +230,8 @@ class ExecutionContext(BaseModel):
     max_memory_usage_mb: float = Field(0.0, ge=0.0, description="Maximum memory usage")
     cpu_time_seconds: float = Field(0.0, ge=0.0, description="CPU time used")
     
-    @validator('input_files', pre=True)
+    @field_validator('input_files', mode='before')
+    @classmethod
     def validate_input_files(cls, v):
         if isinstance(v, list):
             return [Path(f) if not isinstance(f, Path) else f for f in v]
@@ -335,8 +336,9 @@ class AnalysisSummary(BaseModel):
         ]
         return sum(1 for indicator in indicators if indicator)
     
-    @validator('overall_risk_level')
-    def validate_risk_level(cls, v):
+    @field_validator('overall_risk_level')
+    @classmethod
+    def validate_risk_level(cls, v: str) -> str:
         allowed_levels = ['safe', 'low', 'medium', 'high', 'critical', 'unknown']
         if v not in allowed_levels:
             raise ValueError(f"Risk level must be one of: {allowed_levels}")

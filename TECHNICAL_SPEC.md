@@ -3,7 +3,7 @@
 ## 🎯 Project Overview
 
 **Project**: NetStealth Analyzer v2.0 (Complete Refactor)  
-**Python Version**: 3.13+ (with latest features)  
+**Python Version**: 3.13+ (Latest Python Features)  
 **Architecture**: Async-first, Event-driven, Plugin-based  
 **Old Project Location**: `../netstealth-analyzer-old/`  
 **New Project Location**: `../netstealth-analyzer/`  
@@ -371,8 +371,8 @@ poetry shell
 ## 🔗 Reference Links
 
 - **Old Project**: `../netstealth-analyzer-old/`
-- **Python 3.11 Docs**: https://docs.python.org/3.11/
-- **Python 3.12 Features**: https://docs.python.org/3.12/whatsnew/3.12.html
+- **Python 3.13 Docs**: https://docs.python.org/3.13/
+- **Python 3.13 Features**: https://docs.python.org/3.13/whatsnew/3.13.html
 - **Asyncio Guide**: https://docs.python.org/3/library/asyncio.html
 - **Pydantic v2**: https://docs.pydantic.dev/latest/
 - **Poetry Documentation**: https://python-poetry.org/docs/

@@ -17,7 +17,7 @@ from enum import Enum, auto
 import logging
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field, validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from .core.errors import ConfigurationError, ValidationError, ErrorContext
@@ -84,7 +84,8 @@ class PerformanceConfig(BaseModel):
     enable_parallel_processing: bool = True
     batch_size: int = Field(default=100, ge=1, le=10000)
     
-    @validator('timeout_seconds')
+    @field_validator('timeout_seconds')
+    @classmethod
     def validate_timeout(cls, v):
         if v <= 0:
             raise ValueError('Timeout must be positive')
@@ -100,7 +101,8 @@ class SecurityConfig(BaseModel):
     enable_network_access: bool = False
     trusted_domains: List[str] = Field(default_factory=list)
     
-    @validator('allowed_plugin_paths', pre=True)
+    @field_validator('allowed_plugin_paths', mode='before')
+    @classmethod
     def validate_plugin_paths(cls, v):
         if isinstance(v, list):
             return [Path(p) if not isinstance(p, Path) else p for p in v]
@@ -118,7 +120,8 @@ class OutputConfig(BaseModel):
     include_statistics: bool = True
     compress_output: bool = False
     
-    @validator('directory', pre=True)
+    @field_validator('directory', mode='before')
+    @classmethod
     def validate_directory(cls, v):
         path = Path(v) if not isinstance(v, Path) else v
         path.mkdir(parents=True, exist_ok=True)
@@ -137,7 +140,8 @@ class FilterConfig(BaseModel):
     exclude_categories: List[str] = Field(default_factory=list)
     max_issues_per_category: Optional[int] = Field(default=None, ge=1)
     
-    @validator('min_confidence')
+    @field_validator('min_confidence')
+    @classmethod
     def validate_confidence(cls, v):
         if not 0.0 <= v <= 1.0:
             raise ValueError('Confidence must be between 0.0 and 1.0')
@@ -178,7 +182,8 @@ class DetectorConfig(BaseModel):
     browser_config: Dict[str, Any] = Field(default_factory=dict)
     network_config: Dict[str, Any] = Field(default_factory=dict)
     
-    @validator('confidence_threshold')
+    @field_validator('confidence_threshold')
+    @classmethod
     def validate_confidence_threshold(cls, v):
         if not 0.0 <= v <= 1.0:
             raise ValueError('Confidence threshold must be between 0.0 and 1.0')
@@ -195,7 +200,8 @@ class PluginConfig(BaseModel):
     max_plugin_memory_mb: int = Field(default=256, ge=16, le=2048)
     plugin_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
     
-    @validator('plugin_directories', pre=True)
+    @field_validator('plugin_directories', mode='before')
+    @classmethod
     def validate_plugin_directories(cls, v):
         if isinstance(v, list):
             paths = [Path(p) if not isinstance(p, Path) else p for p in v]
@@ -216,7 +222,8 @@ class ReportingConfig(BaseModel):
     include_metadata: bool = True
     include_execution_stats: bool = True
     
-    @validator('template_directory', pre=True)
+    @field_validator('template_directory', mode='before')
+    @classmethod
     def validate_template_directory(cls, v):
         if v is not None:
             path = Path(v) if not isinstance(v, Path) else v

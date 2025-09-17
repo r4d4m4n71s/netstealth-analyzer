@@ -6,7 +6,7 @@ and geographic data with enhanced analysis capabilities.
 
 Author: NetStealth Analyzer Team
 Version: 2.0.0
-Python: 3.11+
+Python: 3.13+
 """
 
 from datetime import datetime, timezone
@@ -114,74 +114,6 @@ class TLSInfo(BaseModel):
         }
 
 
-class HttpRequest(BaseModel):
-    """HTTP request information."""
-    
-    # Request details
-    method: str = Field(..., description="HTTP method (GET, POST, etc.)")
-    url: str = Field(..., description="Request URL")
-    headers: Dict[str, str] = Field(default_factory=dict, description="Request headers")
-    body: Optional[str] = Field(None, description="Request body")
-    
-    # Timing
-    timestamp: Optional[datetime] = Field(None, description="Request timestamp")
-    duration_ms: Optional[float] = Field(None, ge=0, description="Request duration")
-    
-    # Response information
-    status_code: Optional[int] = Field(None, ge=100, le=599, description="HTTP status code")
-    response_headers: Dict[str, str] = Field(default_factory=dict, description="Response headers")
-    response_body: Optional[str] = Field(None, description="Response body")
-    response_size: int = Field(0, ge=0, description="Response size in bytes")
-    
-    @computed_field
-    @property
-    def is_successful(self) -> bool:
-        """Check if request was successful (2xx status)."""
-        return self.status_code is not None and 200 <= self.status_code < 300
-
-
-class HttpResponse(BaseModel):
-    """HTTP response information."""
-    
-    # Response details
-    status_code: int = Field(..., ge=100, le=599, description="HTTP status code")
-    status_text: str = Field("", description="HTTP status text")
-    headers: Dict[str, str] = Field(default_factory=dict, description="Response headers")
-    body: Optional[str] = Field(None, description="Response body")
-    
-    # Timing
-    timestamp: Optional[datetime] = Field(None, description="Response timestamp")
-    duration_ms: Optional[float] = Field(None, ge=0, description="Response time")
-    
-    # Size information
-    content_length: int = Field(0, ge=0, description="Content length in bytes")
-    headers_size: int = Field(0, ge=0, description="Headers size in bytes")
-    
-    @computed_field
-    @property
-    def is_successful(self) -> bool:
-        """Check if response indicates success (2xx status)."""
-        return 200 <= self.status_code < 300
-    
-    @computed_field
-    @property
-    def is_redirect(self) -> bool:
-        """Check if response is a redirect (3xx status)."""
-        return 300 <= self.status_code < 400
-    
-    @computed_field
-    @property
-    def is_client_error(self) -> bool:
-        """Check if response indicates client error (4xx status)."""
-        return 400 <= self.status_code < 500
-    
-    @computed_field
-    @property
-    def is_server_error(self) -> bool:
-        """Check if response indicates server error (5xx status)."""
-        return 500 <= self.status_code < 600
-
-
 class ConnectionInfo(BaseModel):
     """Information about a network connection."""
     
@@ -212,7 +144,7 @@ class ConnectionInfo(BaseModel):
     
     @field_validator('source_ip', 'destination_ip')
     @classmethod
-    def validate_ip_address(cls, v):
+    def validate_ip_address(cls, v: str) -> str:
         try:
             # Try to parse as IPv4 or IPv6
             IPv4Address(v)
@@ -274,8 +206,9 @@ class ProxyInfo(BaseModel):
     actual_country: Optional[str] = Field(None, description="Actual proxy location")
     geographic_consistency: bool = Field(True, description="Whether location is consistent")
     
-    @validator('proxy_ip')
-    def validate_proxy_ip(cls, v):
+    @field_validator('proxy_ip')
+    @classmethod
+    def validate_proxy_ip(cls, v: str) -> str:
         try:
             IPv4Address(v)
         except AddressValueError:
@@ -285,8 +218,9 @@ class ProxyInfo(BaseModel):
                 raise ValueError(f"Invalid proxy IP address: {v}")
         return v
     
-    @validator('anonymity_level')
-    def validate_anonymity_level(cls, v):
+    @field_validator('anonymity_level')
+    @classmethod
+    def validate_anonymity_level(cls, v: str) -> str:
         allowed_levels = ['transparent', 'anonymous', 'elite', 'unknown']
         if v not in allowed_levels:
             raise ValueError(f"Anonymity level must be one of: {allowed_levels}")
@@ -348,8 +282,9 @@ class GeographicInfo(BaseModel):
     detection_method: Optional[str] = Field(None, description="How location was determined")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="Confidence in location data")
     
-    @validator('country_code')
-    def validate_country_code(cls, v):
+    @field_validator('country_code')
+    @classmethod
+    def validate_country_code(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and (len(v) != 2 or not v.isupper()):
             raise ValueError("Country code must be 2 uppercase letters")
         return v
@@ -424,8 +359,9 @@ class NetworkHop(BaseModel):
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     
-    @validator('incoming_ip', 'outgoing_ip')
-    def validate_ip_addresses(cls, v):
+    @field_validator('incoming_ip', 'outgoing_ip')
+    @classmethod
+    def validate_ip_addresses(cls, v: str) -> str:
         try:
             IPv4Address(v)
         except AddressValueError:
@@ -435,8 +371,9 @@ class NetworkHop(BaseModel):
                 raise ValueError(f"Invalid IP address: {v}")
         return v
     
-    @validator('actor_category')
-    def validate_actor_category(cls, v):
+    @field_validator('actor_category')
+    @classmethod
+    def validate_actor_category(cls, v: str) -> str:
         allowed_categories = [
             'client', 'proxy', 'server', 'load_balancer', 'cdn', 
             'firewall', 'router', 'gateway', 'unknown'
@@ -608,14 +545,100 @@ class NetworkTrace(BaseModel):
         return rows
 
 
+class HttpRequest(BaseModel):
+    """HTTP request information for parsing HAR files."""
+    
+    method: str = Field(..., description="HTTP method (GET, POST, etc.)")
+    url: str = Field(..., description="Request URL")
+    headers: List[Dict[str, str]] = Field(default_factory=list, description="Request headers")
+    body: Optional[str] = Field(None, description="Request body")
+    body_size: int = Field(0, ge=0, description="Request body size in bytes")
+    timestamp: Optional[datetime] = Field(None, description="Request timestamp")
+    
+    @field_validator('method')
+    @classmethod
+    def validate_method(cls, v: str) -> str:
+        """Validate HTTP method."""
+        allowed_methods = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH', 'TRACE']
+        if v.upper() not in allowed_methods:
+            raise ValueError(f"Invalid HTTP method: {v}")
+        return v.upper()
+
+
+class HttpResponse(BaseModel):
+    """HTTP response information for parsing HAR files."""
+    
+    status_code: int = Field(..., ge=100, le=599, description="HTTP status code")
+    status_text: str = Field("", description="HTTP status text")
+    headers: List[Dict[str, str]] = Field(default_factory=list, description="Response headers")
+    body: Optional[str] = Field(None, description="Response body")
+    body_size: int = Field(0, ge=0, description="Response body size in bytes")
+    content_type: Optional[str] = Field(None, description="Content type")
+    
+    @computed_field
+    @property
+    def is_success(self) -> bool:
+        """Check if response indicates success."""
+        return 200 <= self.status_code < 300
+    
+    @computed_field
+    @property
+    def is_redirect(self) -> bool:
+        """Check if response is a redirect."""
+        return 300 <= self.status_code < 400
+    
+    @computed_field
+    @property
+    def is_client_error(self) -> bool:
+        """Check if response is a client error."""
+        return 400 <= self.status_code < 500
+    
+    @computed_field
+    @property
+    def is_server_error(self) -> bool:
+        """Check if response is a server error."""
+        return 500 <= self.status_code < 600
+
+
+class TimingInfo(BaseModel):
+    """HTTP request/response timing information from HAR files."""
+    
+    dns_lookup: float = Field(-1, description="DNS lookup time in ms")
+    tcp_connect: float = Field(-1, description="TCP connection time in ms")
+    ssl_handshake: float = Field(-1, description="SSL handshake time in ms")
+    request_sent: float = Field(-1, description="Time to send request in ms")
+    waiting: float = Field(-1, description="Waiting time (TTFB) in ms")
+    content_download: float = Field(-1, description="Content download time in ms")
+    blocked: float = Field(-1, description="Blocked time in ms")
+    
+    @computed_field
+    @property
+    def total_time(self) -> float:
+        """Calculate total request time."""
+        times = [
+            self.dns_lookup, self.tcp_connect, self.ssl_handshake,
+            self.request_sent, self.waiting, self.content_download
+        ]
+        # Only sum positive values (HAR format uses -1 for unavailable timing)
+        valid_times = [t for t in times if t > 0]
+        return sum(valid_times) if valid_times else 0
+    
+    @computed_field
+    @property
+    def has_ssl(self) -> bool:
+        """Check if this request used SSL/TLS."""
+        return self.ssl_handshake > 0
+
+
 # Export all models
 __all__ = [
     'TLSInfo',
-    'HttpRequest',
-    'HttpResponse',
     'ConnectionInfo',
     'ProxyInfo',
     'GeographicInfo',
     'NetworkHop',
     'NetworkTrace',
+    'HttpRequest',
+    'HttpResponse',
+    'TimingInfo',
 ]
