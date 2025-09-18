@@ -5,6 +5,98 @@
 
 The following features represent potential enhancements for future versions, organized by category with complexity and effort estimates.
 
+### **Web Service Behavioral Analysis**
+| Feature | Complexity | Effort | Description |
+|---------|------------|--------|-------------|
+| **Content Access Pattern Detector** | 🟡 Medium | 3-4 days | Detect systematic content harvesting and scraping patterns |
+| **Response Analysis Detector** | 🟡 Medium | 2-3 days | Identify anti-bot responses and fingerprinting attempts |
+| **Timing Analysis Detector** | 🟢 Low | 2 days | Detect service-side throttling and progressive slowdown patterns |
+| **Geographic Analysis Detector** | 🟡 Medium | 3-4 days | Advanced geographic consistency analysis with IP geolocation |
+| **Token Usage Pattern Detector** | 🟡 Medium | 2-3 days | Analyze authentication token usage patterns for anomalies |
+| **Session Behavior Profiling** | 🔴 High | 1-2 weeks | ML-based session behavior analysis for automation detection |
+
+**Implementation Example**:
+```python
+class ContentAccessDetector(BaseDetector):
+    """Detect systematic content access patterns."""
+    
+    def _detect_sequential_access(self, traces: List[NetworkTrace]) -> List[Issue]:
+        """Detect sequential ID access patterns indicating scraping."""
+        # Analyze URL patterns for sequential IDs
+        # Check access timing and frequency
+        # Create issues for detected scraping behavior
+        pass
+    
+    def _detect_bulk_operations(self, traces: List[NetworkTrace]) -> List[Issue]:
+        """Detect bulk data operations."""
+        # Identify bulk API calls
+        # Analyze request patterns and payloads
+        # Flag suspicious bulk operations
+        pass
+```
+
+### **Enhanced Authentication Analysis**
+| Feature | Complexity | Effort | Description |
+|---------|------------|--------|-------------|
+| **JWT Token Analysis** | 🟡 Medium | 2-3 days | Decode and analyze JWT tokens for security issues |
+| **OAuth Flow Detection** | 🟡 Medium | 3-4 days | Detect OAuth authentication flow anomalies |
+| **Session Fixation Detection** | 🟡 Medium | 2-3 days | Identify session fixation and hijacking attempts |
+| **Multi-Factor Auth Bypass** | 🔴 High | 1 week | Detect attempts to bypass MFA mechanisms |
+| **API Key Leakage Detection** | 🟢 Low | 1-2 days | Scan for exposed API keys in requests/responses |
+
+**Implementation Example**:
+```python
+class AuthenticationAnalyzer:
+    def analyze_jwt_token(self, token: str) -> Dict[str, Any]:
+        """Analyze JWT token for security issues."""
+        # Decode JWT without verification
+        # Check for weak algorithms
+        # Analyze claims for sensitive data
+        # Return security assessment
+        pass
+```
+
+### **Advanced Request Pattern Analysis**
+| Feature | Complexity | Effort | Description |
+|---------|------------|--------|-------------|
+| **Human Behavior Simulation** | 🔴 High | 2-3 weeks | ML model to distinguish human vs automated behavior |
+| **Request Fingerprinting** | 🟡 Medium | 1 week | Create unique fingerprints for request patterns |
+| **Anomaly Scoring System** | 🔴 High | 2-3 weeks | Statistical anomaly detection for request patterns |
+| **Behavioral Clustering** | 🔴 High | 3-4 weeks | Cluster similar behavioral patterns using ML |
+| **Real-time Pattern Detection** | 🔴 High | 2-3 weeks | Live detection of suspicious patterns in streaming data |
+
+**Implementation Example**:
+```python
+class BehavioralAnalyzer:
+    def __init__(self):
+        self.ml_model = self._load_behavior_model()
+    
+    def analyze_request_pattern(self, traces: List[NetworkTrace]) -> float:
+        """Return automation probability score (0.0-1.0)."""
+        features = self._extract_behavioral_features(traces)
+        return self.ml_model.predict_proba(features)[0][1]
+```
+
+### **Configuration Security Analysis**
+| Feature | Complexity | Effort | Description |
+|---------|------------|--------|-------------|
+| **API Endpoint Discovery** | 🟡 Medium | 2-3 days | Discover and catalog API endpoints from traffic |
+| **Parameter Fuzzing Detection** | 🟡 Medium | 3-4 days | Detect parameter fuzzing and injection attempts |
+| **Rate Limit Bypass Detection** | 🟡 Medium | 2-3 days | Identify attempts to bypass rate limiting |
+| **CORS Policy Analysis** | 🟢 Low | 1-2 days | Analyze CORS headers for misconfigurations |
+| **Security Header Analysis** | 🟢 Low | 1-2 days | Comprehensive security header validation |
+
+**Implementation Example**:
+```python
+class SecurityConfigAnalyzer:
+    def analyze_cors_policy(self, headers: List[Dict]) -> List[Issue]:
+        """Analyze CORS headers for security issues."""
+        # Check for overly permissive CORS
+        # Validate origin restrictions
+        # Flag dangerous configurations
+        pass
+```
+
 ### **Advanced Proxy Detection**
 | Feature | Complexity | Effort | Description |
 |---------|------------|--------|-------------|

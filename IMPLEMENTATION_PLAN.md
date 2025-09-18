@@ -666,7 +666,311 @@ if __name__ == "__main__":
 }
 ```
 
-### **Priority 3: Release Preparation** 🟡 MEDIUM
+### **Priority 3: Web Service Behavioral Analysis Enhancement** 🔴 CRITICAL
+
+#### **3.1 Generic Behavioral Detection Framework**
+Implement comprehensive behavioral analysis for web services without targeting specific platforms.
+
+**1. Enhanced Detection Context** (`src/netstealth_analyzer/models/network.py`)
+```python
+@dataclass
+class BehavioralAnalysisContext(DetectionContext):
+    """Generic context for behavioral analysis."""
+    
+    # Generic analysis parameters
+    analysis_type: str = "behavioral"  # Type of analysis to perform
+    
+    # Generic behavioral data
+    request_timestamps: Optional[List[datetime]] = None
+    response_patterns: Optional[Dict[str, Any]] = None
+    
+    # Generic configuration data
+    detected_settings: Optional[Dict[str, Any]] = None
+    
+    # Generic geographic data
+    apparent_location: Optional[str] = None
+    detected_locations: Optional[List[str]] = None
+    
+    # Analysis parameters
+    sensitivity_level: str = "medium"  # low, medium, high
+    detection_mode: str = "comprehensive"  # quick, standard, comprehensive
+```
+
+**2. Configuration Consistency Detector** (`src/netstealth_analyzer/detectors/config_consistency.py`)
+```python
+"""
+Generic service configuration analyzer detector.
+
+Detects configuration inconsistencies in web services that could reveal
+proxy usage or automation patterns without targeting specific services.
+"""
+
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+import re
+
+from .base import BaseDetector, DetectionContext, DetectionResult
+from ..models.issues import Issue, IssueEvidence, DetectionRule
+from ..models.enums import SeverityLevel, IssueCategory, DetectionConfidence
+from ..models.network import NetworkTrace
+
+
+class ConfigurationConsistencyDetector(BaseDetector):
+    """
+    Detector for generic configuration inconsistencies.
+    
+    Analyzes API responses for configuration mismatches that could indicate
+    proxy usage or location spoofing without targeting specific services.
+    """
+    
+    def __init__(self, event_bus=None, confidence_threshold=0.7):
+        """Initialize Configuration Consistency detector."""
+        super().__init__(event_bus, confidence_threshold)
+        
+        # Generic configuration patterns (not service-specific)
+        self.config_patterns = {
+            'timezone': r'"timezone":\s*"([^"]+)"',
+            'country': r'"country":\s*"([^"]+)"',
+            'region': r'"region":\s*"([^"]+)"',
+            'locale': r'"locale":\s*"([^"]+)"',
+            'language': r'"language":\s*"([^"]+)"',
+            'currency': r'"currency":\s*"([^"]+)"'
+        }
+        
+        # Generic endpoint patterns that might contain configuration
+        self.config_endpoint_patterns = [
+            r'/api/v\d+/config',
+            r'/api/v\d+/settings',
+            r'/api/v\d+/preferences',
+            r'/api/v\d+/user/profile',
+            r'/api/v\d+/location',
+            r'/api/v\d+/region'
+        ]
+        
+        self._detection_rules = [
+            DetectionRule(
+                id="config_geographic_inconsistency",
+                name="Geographic Configuration Inconsistency",
+                pattern=r"geographic.*inconsistency|location.*mismatch",
+                description="Geographic settings show inconsistencies",
+                category=IssueCategory.CONFIGURATION,
+                severity=SeverityLevel.MEDIUM,
+                confidence=DetectionConfidence.MEDIUM
+            ),
+            DetectionRule(
+                id="config_temporal_inconsistency",
+                name="Temporal Configuration Inconsistency",
+                pattern=r"time.*inconsistency|temporal.*mismatch",
+                description="Time-based settings show inconsistencies",
+                category=IssueCategory.CONFIGURATION,
+                severity=SeverityLevel.LOW,
+                confidence=DetectionConfidence.LOW
+            )
+        ]
+    
+    @property
+    def name(self) -> str:
+        return "Configuration Consistency Detector"
+    
+    @property
+    def version(self) -> str:
+        return "1.0.0"
+    
+    @property
+    def description(self) -> str:
+        return "Detects configuration inconsistencies in generic web services"
+    
+    @property
+    def categories(self) -> List[IssueCategory]:
+        return [IssueCategory.CONFIGURATION]
+    
+    async def detect(self, context: DetectionContext) -> DetectionResult:
+        """Detect configuration issues in service API calls."""
+        # Implementation follows existing pattern
+        # Check for configuration endpoint calls
+        # Analyze response data for mismatches
+        # Create issues for detected problems
+        pass
+```
+
+**3. Request Behavior Detector** (`src/netstealth_analyzer/detectors/request_behavior.py`)
+```python
+"""
+Generic request pattern analyzer for web services.
+
+Detects automated or non-human request patterns without targeting specific services.
+"""
+
+class RequestBehaviorDetector(BaseDetector):
+    """
+    Detector for anomalous request patterns.
+    
+    Analyzes timing, frequency, and sequence of requests to identify
+    potential automation without service-specific assumptions.
+    """
+    
+    def __init__(self, event_bus=None, confidence_threshold=0.7):
+        super().__init__(event_bus, confidence_threshold)
+        
+        # Generic pattern detection thresholds
+        self.behavior_thresholds = {
+            'min_human_interval_ms': 250,      # Minimum time between human actions
+            'max_sequential_requests': 100,     # Max sequential similar requests
+            'max_requests_per_minute': 120,     # Max requests per minute
+            'min_timing_variance': 0.15,        # Minimum variance in timing
+            'max_precision_ratio': 0.8          # Max ratio of precise timings
+        }
+        
+        # Generic suspicious patterns
+        self.behavioral_patterns = {
+            'rapid_sequential': {
+                'description': 'Rapid sequential requests',
+                'threshold_ms': 500
+            },
+            'bulk_data_access': {
+                'description': 'Bulk data retrieval pattern',
+                'threshold_count': 50
+            },
+            'automated_interaction': {
+                'description': 'Automated interaction pattern',
+                'threshold_rate': 20  # per minute
+            },
+            'precise_timing': {
+                'description': 'Suspiciously precise timing',
+                'precision_ms': 100  # Actions at exact intervals
+            }
+        }
+        
+        self._detection_rules = [
+            DetectionRule(
+                id="automated_behavior_pattern",
+                name="Automated Behavior Pattern",
+                pattern=r"automated.*pattern|non-human.*behavior",
+                description="Detected potential automated behavior",
+                category=IssueCategory.BEHAVIORAL_ANOMALY,
+                severity=SeverityLevel.MEDIUM,
+                confidence=DetectionConfidence.MEDIUM
+            ),
+            DetectionRule(
+                id="request_frequency_anomaly",
+                name="Request Frequency Anomaly",
+                pattern=r"frequency.*anomaly|unusual.*rate",
+                description="Abnormal request frequency detected",
+                category=IssueCategory.BEHAVIORAL_ANOMALY,
+                severity=SeverityLevel.LOW,
+                confidence=DetectionConfidence.LOW
+            )
+        ]
+```
+
+**4. Enhanced Pipeline Configuration** (`src/netstealth_analyzer/builder.py`)
+```python
+# Generic pipeline builder without service-specific references
+class EnhancedPipelineBuilder:
+    """Generic pipeline builder for web service analysis."""
+    
+    def __init__(self):
+        self._pipeline = PipelineEngine()
+        self._detector_registry = {
+            # Existing generic detectors
+            'network': NetworkDetector,
+            'browser': BrowserDetector,
+            'proxy': ProxyDetector,
+            
+            # New generic detectors
+            'config_consistency': ConfigurationConsistencyDetector,
+            'request_behavior': RequestBehaviorDetector,
+            'content_access': ContentAccessDetector,
+            'response_analysis': ResponseAnalysisDetector,
+            'timing_analysis': TimingAnalysisDetector,
+            'geographic_analysis': GeographicAnalysisDetector
+        }
+    
+    def with_behavioral_detection(self) -> 'EnhancedPipelineBuilder':
+        """Add behavioral analysis detection stages."""
+        behavioral_detectors = [
+            'config_consistency',
+            'request_behavior',
+            'content_access',
+            'timing_analysis'
+        ]
+        
+        for detector_name in behavioral_detectors:
+            self.with_detector(detector_name, priority=Priority.HIGH)
+        
+        return self
+```
+
+#### **3.2 Enhanced Issue Categories**
+
+**5. Extended Issue Categories** (`src/netstealth_analyzer/models/enums.py`)
+```python
+# Enhanced categories without service-specific references
+class IssueCategory(Enum):
+    """Generic issue categories for web service analysis."""
+    
+    # Existing categories (unchanged)
+    PRIVACY_LEAK = "privacy_leak"
+    PROXY_DETECTION = "proxy_detection"
+    BROWSER_LEAK = "browser_leak"
+    CONFIGURATION = "configuration"
+    NETWORK_ANOMALY = "network_anomaly"
+    
+    # New generic categories
+    BEHAVIORAL_ANOMALY = "behavioral_anomaly"
+    ACCESS_PATTERN = "access_pattern"
+    REQUEST_ANOMALY = "request_anomaly"
+    AUTHENTICATION_ANOMALY = "authentication_anomaly"
+    TEMPORAL_ANOMALY = "temporal_anomaly"
+```
+
+#### **3.3 Detection Capabilities**
+
+The enhanced framework can detect:
+
+1. **Geographic Spoofing**: Through timezone, locale, and region mismatches
+2. **Automated Behavior**: Through timing precision and burst patterns
+3. **Content Scraping**: Through sequential access and rapid traversal
+4. **Anti-Bot Responses**: Through challenge detection and fingerprinting
+5. **Rate Limiting**: Through throttling patterns and response delays
+6. **Proxy Detection**: Through header analysis and network anomalies
+
+**Example Usage**:
+```python
+# Example usage without mentioning specific services
+async def analyze_web_service_traffic():
+    """Analyze generic web service traffic for security issues."""
+    
+    # Build pipeline with generic detectors
+    pipeline = (EnhancedPipelineBuilder()
+        .with_parser('har')
+        .with_parser('mitmproxy')
+        .with_behavioral_detection()  # Adds generic behavioral detectors
+        .with_detector('network')     # Network anomaly detection
+        .with_detector('proxy')       # Proxy detection
+        .with_reporter('json')
+        .with_reporter('html')
+        .build())
+    
+    # Create generic context
+    context = BehavioralAnalysisContext(
+        network_traces=traces,
+        service_domains=domains,  # Generic domains, not service-specific
+        strict_mode=True,
+        confidence_threshold=0.7,
+        analysis_type="behavioral",
+        sensitivity_level="high"
+    )
+    
+    # Execute analysis
+    result = await pipeline.execute(input_data, context)
+    
+    # Results will identify generic security issues without
+    # targeting any specific service
+    return result
+```
+
+### **Priority 4: Release Preparation** 🟡 MEDIUM
 
 #### **16. Update Documentation**
 
