@@ -173,7 +173,7 @@ class BrowserDetector(BaseDetector):
             DetectionResult with found browser issues and statistics
         """
         start_time = time.time()
-        self._emit_progress("browser_detection_started", {"traces": len(context.network_traces)})
+        await self._emit_progress("browser_detection_started", {"traces": len(context.network_traces)})
         
         # Initialize results
         issues = []
@@ -192,7 +192,12 @@ class BrowserDetector(BaseDetector):
                     
                     # Track rules applied
                     for issue in trace_issues:
-                        rule_id = issue.metadata.get('rule_id')
+                        # Handle both dict and IssueMetadata object
+                        if hasattr(issue.metadata, 'get'):
+                            rule_id = issue.metadata.get('rule_id')
+                        else:
+                            rule_id = getattr(issue.metadata, 'rule_id', None)
+                        
                         if rule_id and rule_id not in [r.id for r in rules_applied]:
                             rule = next((r for r in self._detection_rules if r.id == rule_id), None)
                             if rule:
@@ -200,7 +205,7 @@ class BrowserDetector(BaseDetector):
                     
                     # Emit progress every 100 traces
                     if (trace_idx + 1) % 100 == 0:
-                        self._emit_progress("browser_traces_processed", {
+                        await self._emit_progress("browser_traces_processed", {
                             "processed": trace_idx + 1,
                             "total": len(context.network_traces),
                             "issues_found": len(issues)
@@ -239,7 +244,7 @@ class BrowserDetector(BaseDetector):
                 errors=errors
             )
             
-            self._emit_progress("browser_detection_completed", {
+            await self._emit_progress("browser_detection_completed", {
                 "issues_found": len(high_confidence_issues),
                 "processing_time_ms": statistics['processing_time_ms']
             })
@@ -247,7 +252,7 @@ class BrowserDetector(BaseDetector):
             return result
             
         except Exception as e:
-            self._emit_progress("browser_detection_failed", {"error": str(e)})
+            await self._emit_progress("browser_detection_failed", {"error": str(e)})
             raise RuntimeError(f"Browser detection failed: {e}")
     
     async def _analyze_trace_browser(
@@ -485,8 +490,9 @@ class BrowserDetector(BaseDetector):
         
         fingerprinting_traces = []
         for trace in traces:
-            if (trace.response and trace.response.body and 
-                any(re.search(pattern, str(trace.response.body), re.IGNORECASE) 
+            http_response = trace.metadata.get('http_response')
+            if (http_response and http_response.get('body') and 
+                any(re.search(pattern, str(http_response['body']), re.IGNORECASE) 
                     for pattern in self.fingerprinting_patterns)):
                 fingerprinting_traces.append(trace)
         
@@ -508,11 +514,18 @@ class BrowserDetector(BaseDetector):
         prev_timestamp = None
         
         for trace in traces:
-            if trace.timestamp:
+            # Try to get timestamp from trace or metadata
+            timestamp = trace.trace_start
+            if not timestamp:
+                http_request = trace.metadata.get('http_request')
+                if http_request and http_request.get('timestamp'):
+                    timestamp = http_request['timestamp']
+            
+            if timestamp:
                 if prev_timestamp:
-                    interval = (trace.timestamp - prev_timestamp).total_seconds()
+                    interval = (timestamp - prev_timestamp).total_seconds()
                     request_intervals.append(interval)
-                prev_timestamp = trace.timestamp
+                prev_timestamp = timestamp
         
         if len(request_intervals) > 5:
             # Check for suspiciously consistent intervals
@@ -1043,7 +1056,8 @@ class BrowserDetector(BaseDetector):
         if 'canvas' in response_body_str and ('fingerprint' in response_body_str or 'toDataURL' in response_body_str):
             issues.append(self._create_canvas_fingerprinting_issue(trace))
         
-        if 'webgl' in response_body_str and ('getParameter' in response_body_str or 'getSupportedExtensions' in response_body_str):
+        # Enhanced WebGL fingerprinting detection
+        if 'webgl' in response_body_str and ('getparameter' in response_body_str or 'getsupportedextensions' in response_body_str or 'unmasked_vendor_webgl' in response_body_str or 'unmasked_renderer_webgl' in response_body_str):
             issues.append(self._create_webgl_fingerprinting_issue(trace))
         
         return issues
@@ -1078,8 +1092,16 @@ class BrowserDetector(BaseDetector):
         url_lower = url.lower()
         
         # Check for JavaScript-based detection attempts
-        if any(js_pattern in url_lower for js_pattern in ['detect.js', 'fingerprint.js', 'bot-detection.js']):
+        js_detection_patterns = ['detect.js', 'fingerprint.js', 'bot-detection.js', 'detection.js', 'antibot.js', '/js/bot-detection.js']
+        if any(js_pattern in url_lower for js_pattern in js_detection_patterns):
             issues.append(self._create_js_detection_issue_from_metadata(trace, url))
+        
+        # Also check response body for bot detection script content
+        http_response = trace.metadata.get('http_response')
+        if http_response and http_response.get('body'):
+            response_body = str(http_response['body']).lower()
+            if 'bot detection script' in response_body or 'detection script' in response_body:
+                issues.append(self._create_js_detection_issue_from_metadata(trace, url))
         
         return issues
     
@@ -1136,12 +1158,15 @@ class BrowserDetector(BaseDetector):
             )
         ]
         
+        # Extract filename from URL for description
+        filename = url.split('/')[-1] if '/' in url else url
+        
         return self._create_issue(
             title="JavaScript-Based Detection Script",
-            description="Request to JavaScript script designed for bot detection",
+            description=f"Request to JavaScript script designed for bot detection: {filename}",
             category=IssueCategory.JAVASCRIPT_FINGERPRINT,
             severity=SeverityLevel.MEDIUM,
-            confidence=DetectionConfidence.MEDIUM,
+            confidence=DetectionConfidence.HIGH,  # Increased confidence for reliable URL-based detection
             evidence=evidence,
             metadata={
                 "rule_id": "browser_fingerprinting",

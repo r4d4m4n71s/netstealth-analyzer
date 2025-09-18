@@ -290,15 +290,11 @@ class HarParser(BaseLogParser):
                 blocked=timings.get('blocked', -1),
             )
             
-            # Create network trace
+            # Create network trace with HTTP data in metadata
             trace = NetworkTrace(
-                id=f"har_{index}",
-                source_format=LogFormat.HAR,
-                timestamp=request.timestamp,
-                request=request,
-                response=response,
-                timing=timing,
+                trace_id=f"har_{index}",
                 metadata={
+                    'source_format': LogFormat.HAR.value,
                     'entry_index': index,
                     'domain': domain,
                     'is_service': self._is_service_domain(domain),
@@ -309,6 +305,11 @@ class HarParser(BaseLogParser):
                         self._has_proxy_headers(request.headers) or 
                         self._has_proxy_headers(response.headers)
                     ),
+                    # Store HTTP data in metadata
+                    'http_request': request.model_dump(),
+                    'http_response': response.model_dump(),
+                    'http_timing': timing.model_dump(),
+                    'timestamp': request.timestamp.isoformat() if request.timestamp else None,
                 }
             )
             
@@ -384,16 +385,19 @@ class HarParser(BaseLogParser):
         """Update statistics with trace data."""
         stats['total_requests'] += 1
         
-        # Response status
-        if trace.response and 200 <= trace.response.status_code < 300:
+        # Response status from metadata
+        metadata = trace.metadata or {}
+        http_response = metadata.get('http_response', {})
+        status_code = http_response.get('status_code', 0)
+        
+        if 200 <= status_code < 300:
             stats['successful_responses'] += 1
-        elif trace.response and 400 <= trace.response.status_code < 500:
+        elif 400 <= status_code < 500:
             stats['client_errors'] += 1
-        elif trace.response and 500 <= trace.response.status_code < 600:
+        elif 500 <= status_code < 600:
             stats['server_errors'] += 1
         
         # Service and security flags
-        metadata = trace.metadata or {}
         if metadata.get('is_service'):
             stats['service_requests'] += 1
         if metadata.get('has_proxy_headers'):
@@ -412,14 +416,15 @@ class HarParser(BaseLogParser):
         if domain:
             stats['unique_domains'].add(domain)
         
-        # Timing data
-        if trace.timing:
-            total_time = trace.timing.total_time
-            if total_time > 0:
-                stats['response_times'].append(total_time)
-            
-            if trace.timing.ssl_handshake > 0:
-                stats['ssl_times'].append(trace.timing.ssl_handshake)
+        # Timing data from metadata
+        http_timing = metadata.get('http_timing', {})
+        total_time = http_timing.get('total_time', 0)
+        if total_time > 0:
+            stats['response_times'].append(total_time)
+        
+        ssl_handshake = http_timing.get('ssl_handshake', 0)
+        if ssl_handshake > 0:
+            stats['ssl_times'].append(ssl_handshake)
     
     def _finalize_statistics(self, stats: Dict[str, Any], traces: List[NetworkTrace]) -> None:
         """Finalize statistics calculations."""

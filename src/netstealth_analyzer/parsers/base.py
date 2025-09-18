@@ -152,7 +152,19 @@ class ILogParser(ABC):
             data: Event data
         """
         if self.event_bus:
-            self.event_bus.emit(event_type, data)
+            # Create a task for async emit to avoid blocking
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we're in an async context, create a task
+                    loop.create_task(self.event_bus.emit(event_type, data))
+                else:
+                    # If no loop is running, run the emit synchronously
+                    asyncio.run(self.event_bus.emit(event_type, data))
+            except RuntimeError:
+                # If we can't get a loop, just skip the event
+                pass
     
     async def _read_file_async(self, file_path: Path, encoding: str = 'utf-8') -> str:
         """

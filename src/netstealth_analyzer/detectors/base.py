@@ -177,7 +177,7 @@ class IDetector(ABC):
             return False
         return True
     
-    def _emit_progress(self, event_type: str, data: Any = None) -> None:
+    async def _emit_progress(self, event_type: str, data: Any = None) -> None:
         """
         Emit progress event if event bus is available.
         
@@ -186,7 +186,7 @@ class IDetector(ABC):
             data: Event data
         """
         if self.event_bus:
-            self.event_bus.emit(event_type, data)
+            await self.event_bus.emit(event_type, data)
     
     def _create_issue(
         self,
@@ -221,10 +221,13 @@ class IDetector(ABC):
         if remediation_suggestions:
             for suggestion in remediation_suggestions:
                 remediation_objects.append(RemediationSuggestion(
-                    suggestion=suggestion,
-                    impact=f"Addresses {category.value} issue",
-                    difficulty="medium"
+                    title=f"Fix {category.value} issue",
+                    description=suggestion,
+                    effort_level="medium"
                 ))
+        
+        # Convert DetectionConfidence enum to float if needed
+        confidence_value = confidence.numeric_value if hasattr(confidence, 'numeric_value') else float(confidence)
         
         return Issue(
             id=str(uuid4()),
@@ -232,12 +235,12 @@ class IDetector(ABC):
             description=description,
             category=category,
             severity=severity,
-            confidence=confidence,
+            confidence=confidence_value,
+            impact_score=75,  # Default impact score
             evidence=evidence,
-            source=self.name,
-            timestamp=datetime.now(timezone.utc),
-            metadata=metadata or {},
-            remediation_suggestions=remediation_objects
+            detection_timestamp=datetime.now(timezone.utc),
+            remediation_suggestions=remediation_objects,
+            metadata={'detection_method': self.name, **(metadata or {})}
         )
     
     def _create_evidence(
@@ -246,7 +249,8 @@ class IDetector(ABC):
         description: str,
         value: Any,
         source: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        confidence: float = 0.8
     ) -> IssueEvidence:
         """
         Create evidence with standard formatting.
@@ -257,6 +261,7 @@ class IDetector(ABC):
             value: Evidence value
             source: Source of evidence
             metadata: Additional metadata
+            confidence: Confidence in this evidence (0.0-1.0)
             
         Returns:
             Formatted IssueEvidence object
@@ -264,7 +269,8 @@ class IDetector(ABC):
         return IssueEvidence(
             type=evidence_type,
             description=description,
-            value=str(value),
+            raw_data=value,
+            confidence=confidence,
             source=source or self.name,
             metadata=metadata or {}
         )

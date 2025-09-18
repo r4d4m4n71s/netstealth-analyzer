@@ -158,7 +158,7 @@ class NetworkDetector(BaseDetector):
             DetectionResult with found network issues and statistics
         """
         start_time = time.time()
-        self._emit_progress("network_detection_started", {"traces": len(context.network_traces)})
+        await self._emit_progress("network_detection_started", {"traces": len(context.network_traces)})
         
         # Initialize results
         issues = []
@@ -224,7 +224,7 @@ class NetworkDetector(BaseDetector):
                 errors=errors
             )
             
-            self._emit_progress("network_detection_completed", {
+            await self._emit_progress("network_detection_completed", {
                 "issues_found": len(high_confidence_issues),
                 "processing_time_ms": statistics['processing_time_ms']
             })
@@ -232,7 +232,7 @@ class NetworkDetector(BaseDetector):
             return result
             
         except Exception as e:
-            self._emit_progress("network_detection_failed", {"error": str(e)})
+            await self._emit_progress("network_detection_failed", {"error": str(e)})
             raise RuntimeError(f"Network detection failed: {e}")
     
     async def _analyze_trace_network(
@@ -540,7 +540,7 @@ class NetworkDetector(BaseDetector):
                 "status_code",
                 f"Suspicious HTTP status code: {status_code}",
                 f"HTTP {status_code}: {self.suspicious_status_codes[status_code]}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -564,7 +564,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": rule_id,
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "status_code": status_code
             },
             remediation_suggestions=[
@@ -582,7 +582,7 @@ class NetworkDetector(BaseDetector):
                 "anomaly_message",
                 "Network anomaly message detected",
                 f"Pattern matched: {pattern}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -595,7 +595,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "suspicious_traffic_pattern",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "anomaly_pattern": pattern
             },
             remediation_suggestions=[
@@ -613,7 +613,7 @@ class NetworkDetector(BaseDetector):
                 "security_service",
                 "Security service intervention detected",
                 f"Service pattern: {pattern}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -626,7 +626,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "security_service_intervention",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "service_pattern": pattern
             },
             remediation_suggestions=[
@@ -649,7 +649,7 @@ class NetworkDetector(BaseDetector):
                 "security_header",
                 f"Security service header: {header.get('name')}",
                 f"{header.get('name')}: {header.get('value')}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             ))
         
         return self._create_issue(
@@ -661,7 +661,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "security_service_intervention",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "header_count": len(security_headers)
             },
             remediation_suggestions=[
@@ -678,7 +678,7 @@ class NetworkDetector(BaseDetector):
                 "response_time",
                 "Unusually slow response time",
                 f"{response_time:.0f}ms",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -691,7 +691,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "unusual_response_timing",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "response_time_ms": response_time
             },
             remediation_suggestions=[
@@ -708,7 +708,7 @@ class NetworkDetector(BaseDetector):
                 "response_time",
                 "Suspiciously fast response time",
                 f"{response_time:.0f}ms",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -721,7 +721,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "unusual_response_timing",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "response_time_ms": response_time
             },
             remediation_suggestions=[
@@ -743,7 +743,7 @@ class NetworkDetector(BaseDetector):
                 "rate_limit_header",
                 f"Rate limiting header: {header.get('name')}",
                 f"{header.get('name')}: {header.get('value')}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             ))
         
         return self._create_issue(
@@ -755,7 +755,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "rate_limiting_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "header_count": len(rate_limit_headers)
             },
             remediation_suggestions=[
@@ -778,7 +778,7 @@ class NetworkDetector(BaseDetector):
                 "blocking_header",
                 f"Blocking header: {header.get('name')}",
                 f"{header.get('name')}: {header.get('value')}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             ))
         
         return self._create_issue(
@@ -790,7 +790,7 @@ class NetworkDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "network_blocking_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "header_count": len(blocking_headers)
             },
             remediation_suggestions=[

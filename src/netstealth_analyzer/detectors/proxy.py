@@ -153,7 +153,7 @@ class ProxyDetector(BaseDetector):
             DetectionResult with found proxy issues and statistics
         """
         start_time = time.time()
-        self._emit_progress("proxy_detection_started", {"traces": len(context.network_traces)})
+        await self._emit_progress("proxy_detection_started", {"traces": len(context.network_traces)})
         
         # Initialize results
         issues = []
@@ -219,7 +219,7 @@ class ProxyDetector(BaseDetector):
                 errors=errors
             )
             
-            self._emit_progress("proxy_detection_completed", {
+            await self._emit_progress("proxy_detection_completed", {
                 "issues_found": len(high_confidence_issues),
                 "processing_time_ms": statistics['processing_time_ms']
             })
@@ -227,7 +227,7 @@ class ProxyDetector(BaseDetector):
             return result
             
         except Exception as e:
-            self._emit_progress("proxy_detection_failed", {"error": str(e)})
+            await self._emit_progress("proxy_detection_failed", {"error": str(e)})
             raise RuntimeError(f"Proxy detection failed: {e}")
     
     async def _analyze_trace_proxy(
@@ -477,7 +477,7 @@ class ProxyDetector(BaseDetector):
                 "proxy_header",
                 f"Proxy header detected: {header.get('name')}",
                 f"{header.get('name')}: {header.get('value')}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             ))
         
         return self._create_issue(
@@ -489,7 +489,7 @@ class ProxyDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "proxy_headers_exposed",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "header_count": len(proxy_headers)
             },
             remediation_suggestions=[
@@ -506,7 +506,7 @@ class ProxyDetector(BaseDetector):
                 "proxy_detection_message",
                 "Proxy detection message found in response",
                 f"Pattern matched: {pattern}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -519,7 +519,7 @@ class ProxyDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "proxy_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "detection_pattern": pattern
             },
             remediation_suggestions=[
@@ -537,7 +537,7 @@ class ProxyDetector(BaseDetector):
                 "ip_leak_indicator",
                 "IP leak indicator found",
                 f"Pattern matched: {pattern}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -550,7 +550,7 @@ class ProxyDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "ip_leak_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "leak_pattern": pattern
             },
             remediation_suggestions=[
@@ -568,7 +568,7 @@ class ProxyDetector(BaseDetector):
                 "ip_service_response",
                 "IP detection service returned IP address",
                 f"Service: {self._extract_domain(trace.request.url)}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -581,7 +581,7 @@ class ProxyDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "ip_leak_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "service": self._extract_domain(trace.request.url)
             },
             remediation_suggestions=[
@@ -598,7 +598,7 @@ class ProxyDetector(BaseDetector):
                 "webrtc_indicator",
                 "WebRTC leak indicator detected",
                 f"URL: {trace.request.url}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -611,7 +611,7 @@ class ProxyDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "webrtc_leak",
-                "trace_id": trace.id
+                "trace_id": trace.trace_id
             },
             remediation_suggestions=[
                 "Disable WebRTC in browser",
@@ -628,7 +628,7 @@ class ProxyDetector(BaseDetector):
                 "datacenter_detection",
                 "Datacenter IP detection message",
                 f"Pattern: {pattern}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -641,7 +641,7 @@ class ProxyDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "datacenter_ip_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "detection_pattern": pattern
             },
             remediation_suggestions=[

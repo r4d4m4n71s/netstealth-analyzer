@@ -313,11 +313,6 @@ class IFormatterPlugin(IPlugin):
     different output formats and presentation styles.
     """
     
-    @property
-    def plugin_type(self) -> PluginType:
-        """Get plugin type."""
-        return PluginType.FORMATTER
-    
     @abstractmethod
     def format(self, report: 'Report') -> str:
         """

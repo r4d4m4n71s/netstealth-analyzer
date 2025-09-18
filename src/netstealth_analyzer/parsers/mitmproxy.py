@@ -37,7 +37,7 @@ class MitmproxyParser(BaseLogParser):
         # Core patterns for log parsing  
         self.patterns = {
             'timestamp': re.compile(r'^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]'),
-            'client_connect': re.compile(r'\[(.*?)\] client connect'),
+            'client_connect': re.compile(r'\[([^\]]+)\] client connect'),
             'server_connect': re.compile(r'\[(.*?)\] server connect (.*?) \((.*?)\)'),
             'request': re.compile(r'Request: (GET|POST|PUT|DELETE|OPTIONS|HEAD|PATCH) (.+)'),
             'response': re.compile(r'Response: (\d+) (.+)'),
@@ -359,13 +359,9 @@ class MitmproxyParser(BaseLogParser):
             domain = request_data['domain']
             
             trace = NetworkTrace(
-                id=trace_id,
-                source_format=LogFormat.MITMPROXY,
-                timestamp=timestamp or request_data['timestamp'],
-                request=request,
-                response=response,
-                timing=timing,
+                trace_id=trace_id,
                 metadata={
+                    'source_format': LogFormat.MITMPROXY.value,
                     'request_line': request_data['line_number'],
                     'response_line': line_num,
                     'domain': domain,
@@ -377,6 +373,11 @@ class MitmproxyParser(BaseLogParser):
                     'is_oauth': self._is_oauth_related(request_data['url']),
                     'is_secure': request_data['url'].startswith('https://'),
                     'has_proxy_headers': self.service_patterns['proxy_headers'].search(line) is not None,
+                    # Store HTTP data in metadata
+                    'http_request': request.model_dump(),
+                    'http_response': response.model_dump(),
+                    'http_timing': timing.model_dump(),
+                    'timestamp': (timestamp or request_data['timestamp']).isoformat() if (timestamp or request_data['timestamp']) else None,
                 }
             )
             
@@ -455,16 +456,19 @@ class MitmproxyParser(BaseLogParser):
         """Update statistics with trace data."""
         stats['total_requests'] += 1
         
-        # Response status
-        if trace.response and 200 <= trace.response.status_code < 300:
+        # Response status from metadata
+        metadata = trace.metadata or {}
+        http_response = metadata.get('http_response', {})
+        status_code = http_response.get('status_code', 0)
+        
+        if 200 <= status_code < 300:
             stats['successful_responses'] += 1
-        elif trace.response and 400 <= trace.response.status_code < 500:
+        elif 400 <= status_code < 500:
             stats['client_errors'] += 1
-        elif trace.response and 500 <= trace.response.status_code < 600:
+        elif 500 <= status_code < 600:
             stats['server_errors'] += 1
         
         # Service and security flags
-        metadata = trace.metadata or {}
         if metadata.get('is_service'):
             stats['service_requests'] += 1
         if metadata.get('has_proxy_headers'):
@@ -502,7 +506,8 @@ class MitmproxyParser(BaseLogParser):
         if service_traces:
             successful_service = len([
                 t for t in service_traces 
-                if t.response and 200 <= t.response.status_code < 300
+                if t.metadata and t.metadata.get('http_response', {}).get('status_code', 0) >= 200 
+                and t.metadata.get('http_response', {}).get('status_code', 0) < 300
             ])
             stats['service_success_rate'] = (successful_service / len(service_traces)) * 100
         else:

@@ -242,7 +242,7 @@ def assert_issue_valid(issue: Issue):
 
 def assert_network_trace_valid(trace: NetworkTrace):
     """Assert that a network trace is valid."""
-    assert trace.id is not None
+    assert trace.trace_id is not None
     assert trace.request is not None
     assert trace.request.method is not None
     assert trace.request.url is not None

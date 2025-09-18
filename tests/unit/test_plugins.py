@@ -33,7 +33,7 @@ class TestPluginMetadata:
         
         assert metadata.name == "test_plugin"
         assert metadata.version == "1.0.0"
-        assert metadata.plugin_type == PluginType.DETECTOR
+        assert metadata.plugin_type.value == PluginType.DETECTOR.value
         assert metadata.description == "Test plugin for unit testing"
         assert metadata.author == "Test Author"
         assert metadata.python_version == "3.13+"
@@ -65,7 +65,10 @@ class MockDetectorPlugin(IDetectorPlugin):
             version="1.0.0",
             plugin_type=PluginType.DETECTOR,
             description="Mock detector for testing",
-            supported_categories=["proxy_leak"]
+            author="Test Author",
+            supported_categories=["proxy_leak"],
+            async_capable=True,
+            sandboxed=False  # Disable sandboxing for tests
         )
     
     @property
@@ -95,7 +98,10 @@ class MockParserPlugin(IParserPlugin):
             version="1.0.0",
             plugin_type=PluginType.PARSER,
             description="Mock parser for testing",
-            supported_formats=["json"]
+            author="Test Author",
+            supported_formats=["json"],
+            async_capable=True,
+            sandboxed=False  # Disable sandboxing for tests
         )
     
     @property
@@ -127,7 +133,10 @@ class MockFormatterPlugin(IFormatterPlugin):
             name="mock_formatter",
             version="1.0.0",
             plugin_type=PluginType.FORMATTER,
-            description="Mock formatter for testing"
+            description="Mock formatter for testing",
+            author="Test Author",
+            async_capable=True,
+            sandboxed=False  # Disable sandboxing for tests
         )
     
     @property

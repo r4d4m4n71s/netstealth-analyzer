@@ -52,12 +52,12 @@ class PluginRegistry:
     @property
     def loaded_plugins(self) -> List[IPlugin]:
         """Get list of loaded plugins."""
-        return [p for p in self._plugins.values() if p.status == PluginStatus.LOADED]
+        return [p for p in self._plugins.values() if p.is_initialized]
     
     @property
     def active_plugins(self) -> List[IPlugin]:
         """Get list of active plugins."""
-        return [p for p in self._plugins.values() if p.status == PluginStatus.ACTIVE]
+        return [p for p in self._plugins.values() if p.status.value == 'active']
     
     def register_plugin_class(self, plugin_class: Type[IPlugin]) -> None:
         """
@@ -222,15 +222,15 @@ class PluginRegistry:
     
     def get_detector_plugins(self) -> List[IDetectorPlugin]:
         """Get all detector plugins."""
-        return [p for p in self.get_plugins_by_type(PluginType.DETECTOR) if isinstance(p, IDetectorPlugin)]
+        return [p for p in self._plugins.values() if p.plugin_type.value == 'detector']
     
     def get_parser_plugins(self) -> List[IParserPlugin]:
         """Get all parser plugins."""
-        return [p for p in self.get_plugins_by_type(PluginType.PARSER) if isinstance(p, IParserPlugin)]
+        return [p for p in self._plugins.values() if p.plugin_type.value == 'parser']
     
     def get_formatter_plugins(self) -> List[IFormatterPlugin]:
         """Get all formatter plugins."""
-        return [p for p in self.get_plugins_by_type(PluginType.FORMATTER) if isinstance(p, IFormatterPlugin)]
+        return [p for p in self._plugins.values() if p.plugin_type.value == 'formatter']
     
     def list_plugins(self) -> List[Dict[str, Any]]:
         """Get list of all plugins with their metadata."""
@@ -315,8 +315,8 @@ class PluginRegistry:
             if not metadata.name or not metadata.version:
                 return False
             
-            # Check if plugin type is valid
-            if not isinstance(metadata.plugin_type, PluginType):
+            # Check if plugin type is valid - compare enum values
+            if not hasattr(metadata.plugin_type, 'value') or metadata.plugin_type.value not in ['detector', 'parser', 'formatter', 'analyzer', 'utility']:
                 return False
             
             # Validate configuration if provided
@@ -324,7 +324,7 @@ class PluginRegistry:
                 return False
             
             return True
-        except Exception:
+        except Exception as e:
             return False
     
     async def _ensure_dependencies(self, plugin_name: str) -> None:

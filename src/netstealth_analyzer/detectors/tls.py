@@ -321,7 +321,7 @@ class TlsDetector(BaseDetector):
                 "tls_version",
                 "Detected TLS version",
                 str(tls_info.version),
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -335,7 +335,7 @@ class TlsDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "tls_weak_version",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "tls_version": str(tls_info.version)
             },
             remediation_suggestions=[
@@ -352,7 +352,7 @@ class TlsDetector(BaseDetector):
                 "cipher_suite",
                 "Detected cipher suite",
                 str(tls_info.cipher_suite),
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -366,7 +366,7 @@ class TlsDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "tls_weak_cipher",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "cipher_suite": str(tls_info.cipher_suite)
             },
             remediation_suggestions=[
@@ -383,7 +383,7 @@ class TlsDetector(BaseDetector):
                 "certificate_issues",
                 "Certificate problems detected",
                 ", ".join(tls_info.certificate_issues),
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -401,7 +401,7 @@ class TlsDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "tls_certificate_issue",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "certificate_issues": tls_info.certificate_issues
             },
             remediation_suggestions=[
@@ -423,7 +423,7 @@ class TlsDetector(BaseDetector):
                 "fingerprint_risk_score",
                 "Calculated fingerprinting risk score",
                 f"{risk_score:.2f}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -444,7 +444,7 @@ class TlsDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "tls_fingerprint_risk",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "risk_score": risk_score
             },
             remediation_suggestions=[
@@ -474,7 +474,7 @@ class TlsDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "tls_automation_signature",
-                "trace_id": trace.id
+                "trace_id": trace.trace_id
             },
             remediation_suggestions=[
                 "Use stealth mode in browser automation",
