@@ -267,31 +267,36 @@ class BrowserDetector(BaseDetector):
         """
         issues = []
         
+        # Extract HTTP request/response data from metadata
+        http_request = trace.metadata.get('http_request')
+        http_response = trace.metadata.get('http_response')
+        
         # Check user agent for automation indicators
-        if trace.request and trace.request.headers:
-            user_agent_issues = self._check_user_agent(trace)
+        if http_request and http_request.get('headers'):
+            user_agent_issues = self._check_user_agent_from_metadata(trace, http_request)
             issues.extend(user_agent_issues)
             
             # Check for automation headers
-            automation_header_issues = self._check_automation_headers(trace)
+            automation_header_issues = self._check_automation_headers_from_metadata(trace, http_request)
             issues.extend(automation_header_issues)
         
         # Check response content for automation detection
-        if trace.response and trace.response.body:
-            automation_detection_issues = self._check_automation_detection(trace)
+        if http_response and http_response.get('body'):
+            automation_detection_issues = self._check_automation_detection_from_metadata(trace, http_response)
             issues.extend(automation_detection_issues)
             
             # Check for fingerprinting attempts
-            fingerprinting_issues = self._check_fingerprinting_attempts(trace)
+            fingerprinting_issues = self._check_fingerprinting_attempts_from_metadata(trace, http_response)
             issues.extend(fingerprinting_issues)
             
             # Check for anti-bot challenges
-            antibot_issues = self._check_antibot_challenges(trace)
+            antibot_issues = self._check_antibot_challenges_from_metadata(trace, http_response)
             issues.extend(antibot_issues)
         
         # Check JavaScript execution patterns
-        js_issues = self._check_javascript_patterns(trace)
-        issues.extend(js_issues)
+        if http_request:
+            js_issues = self._check_javascript_patterns_from_metadata(trace, http_request)
+            issues.extend(js_issues)
         
         return issues
     
@@ -317,10 +322,13 @@ class BrowserDetector(BaseDetector):
         total_service_requests = 0
         
         for trace in traces:
-            if self._is_service_domain(self._extract_domain(trace.request.url), context.service_domains):
-                total_service_requests += 1
-                if self._has_automation_detection_indicators(trace):
-                    automation_detection_count += 1
+            http_request = trace.metadata.get('http_request')
+            if http_request and http_request.get('url'):
+                domain = self._extract_domain(http_request['url'])
+                if self._is_service_domain(domain, context.service_domains):
+                    total_service_requests += 1
+                    if self._has_automation_detection_indicators_from_metadata(trace):
+                        automation_detection_count += 1
         
         if total_service_requests > 0:
             detection_rate = automation_detection_count / total_service_requests
@@ -528,7 +536,7 @@ class BrowserDetector(BaseDetector):
                 "user_agent",
                 "Suspicious user agent detected",
                 user_agent,
-                metadata={"trace_id": trace.id, "suspicious_term": suspicious_term}
+                metadata={"trace_id": trace.trace_id, "suspicious_term": suspicious_term}
             )
         ]
         
@@ -541,7 +549,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "suspicious_user_agent",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "user_agent": user_agent,
                 "suspicious_term": suspicious_term
             },
@@ -559,7 +567,7 @@ class BrowserDetector(BaseDetector):
                 "user_agent",
                 "Unusual user agent pattern",
                 user_agent,
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -572,7 +580,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "suspicious_user_agent",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "user_agent": user_agent
             },
             remediation_suggestions=[
@@ -593,7 +601,7 @@ class BrowserDetector(BaseDetector):
                 "automation_header",
                 f"Automation header detected: {header.get('name')}",
                 f"{header.get('name')}: {header.get('value')}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             ))
         
         return self._create_issue(
@@ -605,7 +613,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "browser_automation_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "header_count": len(automation_headers)
             },
             remediation_suggestions=[
@@ -622,7 +630,7 @@ class BrowserDetector(BaseDetector):
                 "automation_detection_message",
                 "Automation detection message found",
                 f"Pattern matched: {pattern}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -635,7 +643,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "browser_automation_detected",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "detection_pattern": pattern
             },
             remediation_suggestions=[
@@ -657,7 +665,7 @@ class BrowserDetector(BaseDetector):
                 "fingerprinting_patterns",
                 "Browser fingerprinting patterns detected",
                 ", ".join(fingerprinting_patterns),
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -670,7 +678,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "browser_fingerprinting",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "patterns": fingerprinting_patterns
             },
             remediation_suggestions=[
@@ -688,7 +696,7 @@ class BrowserDetector(BaseDetector):
                 "canvas_fingerprinting",
                 "Canvas fingerprinting detected",
                 "Canvas API usage for fingerprinting detected",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -701,7 +709,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "browser_fingerprinting",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "fingerprint_type": "canvas"
             },
             remediation_suggestions=[
@@ -718,7 +726,7 @@ class BrowserDetector(BaseDetector):
                 "webgl_fingerprinting",
                 "WebGL fingerprinting detected",
                 "WebGL API usage for fingerprinting detected",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -731,7 +739,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "browser_fingerprinting",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "fingerprint_type": "webgl"
             },
             remediation_suggestions=[
@@ -748,7 +756,7 @@ class BrowserDetector(BaseDetector):
                 "antibot_response",
                 "Anti-bot challenge response",
                 f"Status: {trace.response.status_code}",
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -761,7 +769,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "anti_bot_challenge",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "status_code": trace.response.status_code
             },
             remediation_suggestions=[
@@ -779,7 +787,7 @@ class BrowserDetector(BaseDetector):
                 "js_detection_url",
                 "JavaScript detection script URL",
                 trace.request.url,
-                metadata={"trace_id": trace.id}
+                metadata={"trace_id": trace.trace_id}
             )
         ]
         
@@ -792,7 +800,7 @@ class BrowserDetector(BaseDetector):
             evidence=evidence,
             metadata={
                 "rule_id": "browser_fingerprinting",
-                "trace_id": trace.id,
+                "trace_id": trace.trace_id,
                 "detection_url": trace.request.url
             },
             remediation_suggestions=[
@@ -948,3 +956,201 @@ class BrowserDetector(BaseDetector):
             if domain == service_domain.lower() or domain.endswith(f".{service_domain.lower()}"):
                 return True
         return False
+    
+    # New metadata-based helper methods
+    def _check_user_agent_from_metadata(self, trace: NetworkTrace, http_request: Dict[str, Any]) -> List[Issue]:
+        """Check user agent for automation indicators from metadata."""
+        issues = []
+        
+        headers = http_request.get('headers', [])
+        if not headers:
+            return issues
+        
+        user_agent = self._get_header_value(headers, 'user-agent')
+        if not user_agent:
+            return issues
+        
+        user_agent_lower = user_agent.lower()
+        
+        # Check for suspicious automation tools in user agent
+        for suspicious_ua in self.suspicious_user_agents:
+            if suspicious_ua in user_agent_lower:
+                issues.append(self._create_suspicious_user_agent_issue(trace, user_agent, suspicious_ua))
+                break
+        
+        # Check for unusual user agent patterns
+        if self._is_unusual_user_agent(user_agent):
+            issues.append(self._create_unusual_user_agent_issue(trace, user_agent))
+        
+        return issues
+    
+    def _check_automation_headers_from_metadata(self, trace: NetworkTrace, http_request: Dict[str, Any]) -> List[Issue]:
+        """Check for automation-revealing headers from metadata."""
+        issues = []
+        
+        headers = http_request.get('headers', [])
+        if not headers:
+            return issues
+        
+        automation_headers_found = []
+        for header in headers:
+            header_name = header.get('name', '').lower()
+            if any(auto_header in header_name for auto_header in self.automation_headers):
+                automation_headers_found.append(header)
+        
+        if automation_headers_found:
+            issues.append(self._create_automation_headers_issue(trace, automation_headers_found))
+        
+        return issues
+    
+    def _check_automation_detection_from_metadata(self, trace: NetworkTrace, http_response: Dict[str, Any]) -> List[Issue]:
+        """Check response content for automation detection messages from metadata."""
+        issues = []
+        
+        response_body = http_response.get('body')
+        if not response_body:
+            return issues
+        
+        response_body_str = str(response_body).lower()
+        
+        for pattern in self.automation_patterns:
+            if re.search(pattern, response_body_str, re.IGNORECASE):
+                issues.append(self._create_automation_detection_issue(trace, pattern))
+                break  # Only create one issue per trace to avoid duplicates
+        
+        return issues
+    
+    def _check_fingerprinting_attempts_from_metadata(self, trace: NetworkTrace, http_response: Dict[str, Any]) -> List[Issue]:
+        """Check for browser fingerprinting attempts from metadata."""
+        issues = []
+        
+        response_body = http_response.get('body')
+        if not response_body:
+            return issues
+        
+        response_body_str = str(response_body).lower()
+        
+        # Check for fingerprinting JavaScript
+        fingerprinting_found = []
+        for pattern in self.fingerprinting_patterns:
+            if re.search(pattern, response_body_str, re.IGNORECASE):
+                fingerprinting_found.append(pattern)
+        
+        if fingerprinting_found:
+            issues.append(self._create_fingerprinting_issue(trace, fingerprinting_found))
+        
+        # Check for specific fingerprinting techniques
+        if 'canvas' in response_body_str and ('fingerprint' in response_body_str or 'toDataURL' in response_body_str):
+            issues.append(self._create_canvas_fingerprinting_issue(trace))
+        
+        if 'webgl' in response_body_str and ('getParameter' in response_body_str or 'getSupportedExtensions' in response_body_str):
+            issues.append(self._create_webgl_fingerprinting_issue(trace))
+        
+        return issues
+    
+    def _check_antibot_challenges_from_metadata(self, trace: NetworkTrace, http_response: Dict[str, Any]) -> List[Issue]:
+        """Check for anti-bot challenges from metadata."""
+        issues = []
+        
+        status_code = http_response.get('status_code')
+        if not status_code:
+            return issues
+        
+        # Check response status codes
+        if status_code in [403, 429, 503]:
+            response_body = http_response.get('body', '')
+            response_body_str = str(response_body).lower()
+            
+            # Check for specific anti-bot services
+            if any(pattern in response_body_str for pattern in ['cloudflare', 'captcha', 'challenge']):
+                issues.append(self._create_antibot_challenge_issue_from_metadata(trace, status_code))
+        
+        return issues
+    
+    def _check_javascript_patterns_from_metadata(self, trace: NetworkTrace, http_request: Dict[str, Any]) -> List[Issue]:
+        """Check for suspicious JavaScript execution patterns from metadata."""
+        issues = []
+        
+        url = http_request.get('url', '')
+        if not url:
+            return issues
+        
+        url_lower = url.lower()
+        
+        # Check for JavaScript-based detection attempts
+        if any(js_pattern in url_lower for js_pattern in ['detect.js', 'fingerprint.js', 'bot-detection.js']):
+            issues.append(self._create_js_detection_issue_from_metadata(trace, url))
+        
+        return issues
+    
+    def _has_automation_detection_indicators_from_metadata(self, trace: NetworkTrace) -> bool:
+        """Check if trace has automation detection indicators from metadata."""
+        http_response = trace.metadata.get('http_response')
+        if http_response and http_response.get('body'):
+            response_body = str(http_response['body']).lower()
+            return any(
+                re.search(pattern, response_body, re.IGNORECASE) 
+                for pattern in self.automation_patterns
+            )
+        return False
+    
+    def _create_antibot_challenge_issue_from_metadata(self, trace: NetworkTrace, status_code: int) -> Issue:
+        """Create issue for anti-bot challenge from metadata."""
+        evidence = [
+            self._create_evidence(
+                "antibot_response",
+                "Anti-bot challenge response",
+                f"Status: {status_code}",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Anti-Bot Challenge Triggered",
+            description=f"Anti-bot protection triggered (HTTP {status_code})",
+            category=IssueCategory.BROWSER_CONFIG,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "anti_bot_challenge",
+                "trace_id": trace.trace_id,
+                "status_code": status_code
+            },
+            remediation_suggestions=[
+                "Implement CAPTCHA solving",
+                "Use residential IP addresses",
+                "Add human-like delays",
+                "Solve challenges manually"
+            ]
+        )
+    
+    def _create_js_detection_issue_from_metadata(self, trace: NetworkTrace, url: str) -> Issue:
+        """Create issue for JavaScript-based detection from metadata."""
+        evidence = [
+            self._create_evidence(
+                "js_detection_url",
+                "JavaScript detection script URL",
+                url,
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="JavaScript-Based Detection Script",
+            description="Request to JavaScript script designed for bot detection",
+            category=IssueCategory.JAVASCRIPT_FINGERPRINT,
+            severity=SeverityLevel.MEDIUM,
+            confidence=DetectionConfidence.MEDIUM,
+            evidence=evidence,
+            metadata={
+                "rule_id": "browser_fingerprinting",
+                "trace_id": trace.trace_id,
+                "detection_url": url
+            },
+            remediation_suggestions=[
+                "Block detection scripts",
+                "Use script blocking extensions",
+                "Modify JavaScript execution environment"
+            ]
+        )
