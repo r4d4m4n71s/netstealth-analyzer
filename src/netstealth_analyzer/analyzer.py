@@ -1,0 +1,538 @@
+"""
+Main NetStealth Analyzer module.
+
+This module provides the primary analyzer class that coordinates all components
+and provides the main entry point for security analysis operations.
+
+Author: NetStealth Analyzer Team
+Version: 2.0.0
+Python: 3.11+
+"""
+
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional, Union, Callable, AsyncIterator
+from pathlib import Path
+from datetime import datetime, timezone
+
+from .config import NetStealthConfig
+from .core.events import EventBus, AnalysisEvent
+from .core.interfaces import IComponent, ILogParser, IDetector, IReporter, ProcessingContext
+from .core.pipeline import PipelineEngine
+from .models.enums import LogFormat, AnalysisStatus
+from .models.results import AnalysisResult, ExecutionContext, AnalysisSummary
+from .compatibility import override
+
+logger = logging.getLogger(__name__)
+
+
+class NetStealthAnalyzer:
+    """
+    Main NetStealth Analyzer class.
+    
+    Provides the primary interface for performing security analysis
+    with comprehensive configuration and async support.
+    """
+    
+    def __init__(
+        self,
+        config: NetStealthConfig,
+        event_bus: EventBus,
+        log_files: List[Path],
+        log_formats: Dict[Path, LogFormat],
+        parsers: List[ILogParser],
+        detectors: List[IDetector],
+        reporters: List[IReporter],
+        plugins: List[IComponent],
+        progress_callback: Optional[Callable] = None
+    ):
+        """
+        Initialize the NetStealth Analyzer.
+        
+        Args:
+            config: Configuration object
+            event_bus: Event bus for progress tracking
+            log_files: List of log files to analyze
+            log_formats: Mapping of files to their formats
+            parsers: List of parser components
+            detectors: List of detector components
+            reporters: List of reporter components
+            plugins: List of plugin components
+            progress_callback: Optional progress callback function
+        """
+        self._config = config
+        self._event_bus = event_bus
+        self._log_files = log_files
+        self._log_formats = log_formats
+        self._parsers = parsers
+        self._detectors = detectors
+        self._reporters = reporters
+        self._plugins = plugins
+        self._progress_callback = progress_callback
+        
+        # Initialize pipeline
+        self._pipeline = PipelineEngine(
+            name="netstealth_analyzer",
+            event_bus=event_bus
+        )
+        
+        # Track analysis state
+        self._is_initialized = False
+        self._current_analysis: Optional[AnalysisResult] = None
+    
+    @classmethod
+    def create(cls):
+        """
+        Create a new analyzer builder for fluent configuration.
+        
+        Returns:
+            New AnalyzerBuilder instance
+        """
+        from .builder import AnalyzerBuilder
+        return AnalyzerBuilder()
+    
+    @property
+    def config(self) -> NetStealthConfig:
+        """Get the current configuration."""
+        return self._config
+    
+    @property
+    def is_initialized(self) -> bool:
+        """Check if analyzer is initialized."""
+        return self._is_initialized
+    
+    @property
+    def current_analysis(self) -> Optional[AnalysisResult]:
+        """Get the current analysis result if available."""
+        return self._current_analysis
+    
+    async def initialize(self) -> None:
+        """Initialize the analyzer and all components."""
+        if self._is_initialized:
+            return
+        
+        logger.info("Initializing NetStealth Analyzer...")
+        
+        try:
+            # Initialize pipeline
+            await self._pipeline.initialize(self._config.performance.model_dump())
+            
+            # Initialize all components
+            for component_list in [self._parsers, self._detectors, self._reporters, self._plugins]:
+                for component in component_list:
+                    if hasattr(component, 'initialize'):
+                        await component.initialize()
+            
+            self._is_initialized = True
+            logger.info("NetStealth Analyzer initialized successfully")
+            
+            # Emit initialization event
+            await self._event_bus.emit(
+                AnalysisEvent.ANALYSIS_STARTED,
+                {
+                    'analyzer_version': '2.0.0',
+                    'log_files_count': len(self._log_files),
+                    'components_count': len(self._parsers) + len(self._detectors) + len(self._reporters) + len(self._plugins)
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize analyzer: {e}")
+            raise
+    
+    async def shutdown(self) -> None:
+        """Shutdown the analyzer and cleanup resources."""
+        if not self._is_initialized:
+            return
+        
+        logger.info("Shutting down NetStealth Analyzer...")
+        
+        try:
+            # Shutdown pipeline
+            await self._pipeline.shutdown()
+            
+            # Shutdown all components
+            for component_list in [self._parsers, self._detectors, self._reporters, self._plugins]:
+                for component in component_list:
+                    if hasattr(component, 'shutdown'):
+                        await component.shutdown()
+            
+            self._is_initialized = False
+            logger.info("NetStealth Analyzer shutdown complete")
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            raise
+    
+    async def analyze(self) -> AnalysisResult:
+        """
+        Perform complete analysis of configured log files.
+        
+        Returns:
+            Complete analysis results
+            
+        Raises:
+            RuntimeError: If analyzer is not initialized
+            Exception: If analysis fails
+        """
+        if not self._is_initialized:
+            await self.initialize()
+        
+        if not self._log_files:
+            raise ValueError("No log files configured for analysis")
+        
+        logger.info(f"Starting analysis of {len(self._log_files)} log files")
+        
+        # Create execution context
+        execution_context = ExecutionContext(
+            analyzer_version="2.0.0",
+            input_files=self._log_files,
+            input_formats=list(self._log_formats.values()),
+            components_used=[
+                *[type(p).__name__ for p in self._parsers],
+                *[type(d).__name__ for d in self._detectors],
+                *[type(r).__name__ for r in self._reporters],
+            ],
+            plugins_loaded=[p.metadata.name for p in self._plugins if hasattr(p, 'metadata')]
+        )
+        
+        # Create processing context
+        processing_context = ProcessingContext(
+            file_path=self._log_files[0] if self._log_files else None
+        )
+        
+        try:
+            # Prepare input data
+            input_data = {
+                'log_files': self._log_files,
+                'log_formats': self._log_formats,
+                'config': self._config.model_dump(),
+                'execution_context': execution_context.model_dump()
+            }
+            
+            # Execute analysis pipeline
+            pipeline_result = await self._pipeline.execute(
+                input_data=input_data,
+                context=processing_context
+            )
+            
+            if not pipeline_result.success:
+                raise pipeline_result.error or Exception("Pipeline execution failed")
+            
+            # Create analysis summary
+            summary = AnalysisSummary(
+                status=AnalysisStatus.SUCCESS,
+                overall_score=self._calculate_overall_score(pipeline_result.data),
+                analysis_duration_ms=pipeline_result.processing_time_ms or 0,
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Create analysis result
+            result = AnalysisResult(
+                summary=summary,
+                execution_context=execution_context
+            )
+            
+            # Process pipeline results
+            if pipeline_result.data:
+                self._process_pipeline_results(result, pipeline_result.data)
+            
+            # Finalize result
+            result.finalize_result()
+            
+            # Store current analysis
+            self._current_analysis = result
+            
+            logger.info(f"Analysis completed successfully. Score: {summary.overall_score}/100")
+            
+            # Emit completion event
+            await self._event_bus.emit(
+                AnalysisEvent.ANALYSIS_COMPLETED,
+                {
+                    'result_id': result.result_id,
+                    'overall_score': summary.overall_score,
+                    'issues_count': len(result.issues),
+                    'duration_ms': summary.analysis_duration_ms
+                }
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Analysis failed: {e}")
+            
+            # Create failed result
+            summary = AnalysisSummary(
+                status=AnalysisStatus.FAILED,
+                overall_score=0,
+                analysis_duration_ms=execution_context.duration_seconds * 1000 if execution_context.duration_seconds else 0
+            )
+            
+            result = AnalysisResult(
+                summary=summary,
+                execution_context=execution_context
+            )
+            
+            result.finalize_result()
+            self._current_analysis = result
+            
+            # Emit failure event
+            await self._event_bus.emit(
+                AnalysisEvent.ANALYSIS_FAILED,
+                {
+                    'error_type': type(e).__name__,
+                    'error_message': str(e),
+                    'execution_id': execution_context.execution_id
+                }
+            )
+            
+            return result
+    
+    async def stream_analysis(self) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Perform streaming analysis with real-time results.
+        
+        Yields:
+            Analysis results as they become available
+            
+        Raises:
+            RuntimeError: If analyzer is not initialized
+        """
+        if not self._is_initialized:
+            await self.initialize()
+        
+        if not self._log_files:
+            raise ValueError("No log files configured for analysis")
+        
+        logger.info(f"Starting streaming analysis of {len(self._log_files)} log files")
+        
+        # Create execution context
+        execution_context = ExecutionContext(
+            analyzer_version="2.0.0",
+            input_files=self._log_files,
+            input_formats=list(self._log_formats.values())
+        )
+        
+        # Create processing context
+        processing_context = ProcessingContext()
+        
+        try:
+            # Create input stream
+            input_stream = self._create_input_stream()
+            
+            # Stream results from pipeline
+            async for result in self._pipeline.execute_streaming(input_stream, processing_context):
+                # Process and yield result
+                processed_result = self._process_streaming_result(result)
+                if processed_result:
+                    yield processed_result
+                    
+                    # Call progress callback if provided
+                    if self._progress_callback:
+                        try:
+                            self._progress_callback(
+                                processed_result.get('current', 0),
+                                processed_result.get('total', 0),
+                                processed_result.get('message', 'Processing...')
+                            )
+                        except Exception as e:
+                            logger.warning(f"Progress callback error: {e}")
+                
+        except Exception as e:
+            logger.error(f"Streaming analysis failed: {e}")
+            
+            # Yield error result
+            yield {
+                'type': 'error',
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'execution_id': execution_context.execution_id,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def analyze_single_file(self, file_path: Union[str, Path], format: Optional[LogFormat] = None) -> AnalysisResult:
+        """
+        Analyze a single log file.
+        
+        Args:
+            file_path: Path to the log file
+            format: Log format (auto-detected if not specified)
+            
+        Returns:
+            Analysis results for the single file
+        """
+        # Create temporary analyzer configuration
+        from .builder import AnalyzerBuilder
+        
+        builder = AnalyzerBuilder()
+        builder.with_log(file_path, format)
+        
+        # Copy current configuration
+        if self._config.target_service:
+            builder.for_service(self._config.target_service)
+        
+        if self._config.geography:
+            builder.in_geography(self._config.geography)
+        
+        # Build and analyze
+        temp_analyzer = builder.build()
+        
+        try:
+            return await temp_analyzer.analyze()
+        finally:
+            await temp_analyzer.shutdown()
+    
+    def get_analysis_summary(self) -> Optional[Dict[str, Any]]:
+        """
+        Get summary of the current analysis.
+        
+        Returns:
+            Analysis summary dictionary or None if no analysis has been performed
+        """
+        if not self._current_analysis:
+            return None
+        
+        return self._current_analysis.get_comprehensive_summary()
+    
+    def get_issues_by_severity(self, severity: str) -> List[Dict[str, Any]]:
+        """
+        Get issues filtered by severity level.
+        
+        Args:
+            severity: Severity level to filter by
+            
+        Returns:
+            List of issues with the specified severity
+        """
+        if not self._current_analysis:
+            return []
+        
+        from .models.enums import SeverityLevel
+        
+        try:
+            severity_enum = SeverityLevel(severity.lower())
+            issues = self._current_analysis.get_issues_by_severity(severity_enum)
+            return [issue.to_dict() for issue in issues]
+        except ValueError:
+            logger.warning(f"Invalid severity level: {severity}")
+            return []
+    
+    def get_network_traces(self) -> List[Dict[str, Any]]:
+        """
+        Get all network traces from the current analysis.
+        
+        Returns:
+            List of network trace summaries
+        """
+        if not self._current_analysis:
+            return []
+        
+        return [trace.get_trace_summary() for trace in self._current_analysis.network_traces]
+    
+    async def _create_input_stream(self) -> AsyncIterator[Dict[str, Any]]:
+        """Create input stream from log files."""
+        for i, log_file in enumerate(self._log_files):
+            yield {
+                'file_path': log_file,
+                'format': self._log_formats.get(log_file),
+                'file_index': i,
+                'total_files': len(self._log_files),
+                'timestamp': datetime.now(timezone.utc)
+            }
+    
+    def _process_streaming_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Process a streaming result from the pipeline."""
+        if not result:
+            return None
+        
+        # Add metadata
+        processed = {
+            'type': 'analysis_update',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analyzer_version': '2.0.0',
+            **result
+        }
+        
+        return processed
+    
+    def _process_pipeline_results(self, result: AnalysisResult, pipeline_data: Dict[str, Any]) -> None:
+        """Process results from the pipeline execution."""
+        # Extract issues if present
+        if 'issues' in pipeline_data:
+            for issue_data in pipeline_data['issues']:
+                try:
+                    from .models.issues import Issue
+                    issue = Issue(**issue_data)
+                    result.add_issue(issue)
+                except Exception as e:
+                    logger.warning(f"Failed to process issue: {e}")
+        
+        # Extract network traces if present
+        if 'network_traces' in pipeline_data:
+            for trace_data in pipeline_data['network_traces']:
+                try:
+                    from .models.network import NetworkTrace
+                    trace = NetworkTrace(**trace_data)
+                    result.add_network_trace(trace)
+                except Exception as e:
+                    logger.warning(f"Failed to process network trace: {e}")
+        
+        # Extract performance metrics if present
+        if 'performance' in pipeline_data:
+            try:
+                result.performance_metrics = result.performance_metrics.model_copy(
+                    update=pipeline_data['performance']
+                )
+            except Exception as e:
+                logger.warning(f"Failed to process performance metrics: {e}")
+        
+        # Extract processing stats if present
+        if 'processing_stats' in pipeline_data:
+            try:
+                result.processing_stats = result.processing_stats.model_copy(
+                    update=pipeline_data['processing_stats']
+                )
+            except Exception as e:
+                logger.warning(f"Failed to process processing stats: {e}")
+    
+    def _calculate_overall_score(self, pipeline_data: Dict[str, Any]) -> int:
+        """Calculate overall analysis score based on pipeline results."""
+        base_score = 100
+        
+        # Deduct points for issues
+        issues = pipeline_data.get('issues', [])
+        for issue in issues:
+            severity = issue.get('severity', 'info')
+            if severity == 'critical':
+                base_score -= 20
+            elif severity == 'high':
+                base_score -= 10
+            elif severity == 'medium':
+                base_score -= 5
+            elif severity == 'low':
+                base_score -= 2
+            else:  # info
+                base_score -= 1
+        
+        # Add points for successful functional indicators
+        functional_indicators = pipeline_data.get('functional_indicators', {})
+        successful_indicators = sum(1 for indicator in functional_indicators.values() if indicator)
+        base_score += successful_indicators * 5
+        
+        # Ensure score is within bounds
+        return max(0, min(100, base_score))
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.initialize()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.shutdown()
+
+
+# Export public API
+__all__ = [
+    'NetStealthAnalyzer',
+]
