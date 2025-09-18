@@ -406,11 +406,9 @@ class PipelineEngine(IComponent):
         # Topological sort using Kahn's algorithm
         in_degree = {name: 0 for name in self._stages}
         
-        # Calculate in-degrees
-        for deps in self._dependency_graph.values():
-            for dep in deps:
-                if dep in in_degree:
-                    in_degree[dep] += 1
+        # Calculate in-degrees (how many dependencies each stage has)
+        for stage_name, deps in self._dependency_graph.items():
+            in_degree[stage_name] = len(deps)
         
         # Find stages with no dependencies
         queue = [name for name, degree in in_degree.items() if degree == 0]
@@ -422,7 +420,7 @@ class PipelineEngine(IComponent):
             current = queue.pop(0)
             result.append(current)
             
-            # Update in-degrees of dependent stages
+            # Update in-degrees of stages that depend on current stage
             for stage_name, deps in self._dependency_graph.items():
                 if current in deps:
                     in_degree[stage_name] -= 1

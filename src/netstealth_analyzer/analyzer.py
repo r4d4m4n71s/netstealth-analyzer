@@ -81,7 +81,7 @@ class NetStealthAnalyzer:
         self._current_analysis: Optional[AnalysisResult] = None
     
     @classmethod
-    def create(self):
+    def create(cls):
         """
         Create a new analyzer builder for fluent configuration.
         
@@ -198,9 +198,6 @@ class NetStealthAnalyzer:
         
         # Create processing context
         processing_context = ProcessingContext(
-            execution_id=execution_context.execution_id,
-            target_service=self._config.target_service,
-            geography=self._config.geography,
             file_path=self._log_files[0] if self._log_files else None
         )
         
@@ -317,11 +314,7 @@ class NetStealthAnalyzer:
         )
         
         # Create processing context
-        processing_context = ProcessingContext(
-            execution_id=execution_context.execution_id,
-            target_service=self._config.target_service,
-            geography=self._config.geography
-        )
+        processing_context = ProcessingContext()
         
         try:
             # Create input stream

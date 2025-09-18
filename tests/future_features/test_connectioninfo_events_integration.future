@@ -14,7 +14,7 @@ from src.netstealth_analyzer.models.network import (
     ConnectionInfo, NetworkProtocol, TLSInfo, TLSVersion, NetworkTrace, NetworkHop
 )
 from src.netstealth_analyzer.models.enums import RiskLevel
-from src.netstealth_analyzer.core.events import EventBus, AnalysisEvent, NetworkEvent
+from src.netstealth_analyzer.core.events import EventBus, AnalysisEvent
 
 
 class TestConnectionInfoEventsIntegration:

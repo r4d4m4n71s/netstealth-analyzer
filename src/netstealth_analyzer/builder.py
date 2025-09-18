@@ -707,7 +707,7 @@ class NetStealthAnalyzer:
         )
     
     @classmethod
-    def create() -> AnalyzerBuilder:
+    def create(cls) -> AnalyzerBuilder:
         """
         Create a new analyzer builder for fluent configuration.
         
