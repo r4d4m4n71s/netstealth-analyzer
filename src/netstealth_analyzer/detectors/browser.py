@@ -14,7 +14,7 @@ import json
 from .base import BaseDetector, DetectionContext, DetectionResult
 from ..models.issues import Issue, IssueEvidence, DetectionRule
 from ..models.enums import SeverityLevel, IssueCategory, DetectionConfidence
-from ..models.network import NetworkTrace
+from ..models.network import NetworkTrace, HttpTrace
 
 
 class BrowserDetector(BaseDetector):
@@ -272,36 +272,48 @@ class BrowserDetector(BaseDetector):
         """
         issues = []
         
-        # Extract HTTP request/response data from metadata
-        http_request = trace.metadata.get('http_request')
-        http_response = trace.metadata.get('http_response')
+        # Use protocol-aware methods to get HTTP data
+        request = self._get_request_data(trace)
+        response = self._get_response_data(trace)
         
         # Check user agent for automation indicators
-        if http_request and http_request.get('headers'):
-            user_agent_issues = self._check_user_agent_from_metadata(trace, http_request)
+        if request and request.headers:
+            user_agent_issues = self._check_user_agent(trace)
             issues.extend(user_agent_issues)
             
             # Check for automation headers
-            automation_header_issues = self._check_automation_headers_from_metadata(trace, http_request)
+            automation_header_issues = self._check_automation_headers(trace)
             issues.extend(automation_header_issues)
         
         # Check response content for automation detection
-        if http_response and http_response.get('body'):
-            automation_detection_issues = self._check_automation_detection_from_metadata(trace, http_response)
+        if response and response.body:
+            automation_detection_issues = self._check_automation_detection(trace)
             issues.extend(automation_detection_issues)
             
             # Check for fingerprinting attempts
-            fingerprinting_issues = self._check_fingerprinting_attempts_from_metadata(trace, http_response)
+            fingerprinting_issues = self._check_fingerprinting_attempts(trace)
             issues.extend(fingerprinting_issues)
             
             # Check for anti-bot challenges
-            antibot_issues = self._check_antibot_challenges_from_metadata(trace, http_response)
+            antibot_issues = self._check_antibot_challenges(trace)
             issues.extend(antibot_issues)
         
         # Check JavaScript execution patterns
-        if http_request:
-            js_issues = self._check_javascript_patterns_from_metadata(trace, http_request)
+        if request:
+            js_issues = self._check_javascript_patterns(trace)
             issues.extend(js_issues)
+        
+        # Check for data exposure issues
+        data_exposure_issues = self._check_data_exposure(trace)
+        issues.extend(data_exposure_issues)
+        
+        # Check for tracking indicators
+        tracking_issues = self._check_tracking_indicators(trace)
+        issues.extend(tracking_issues)
+        
+        # Check for debug information leakage
+        debug_issues = self._check_debug_leakage(trace)
+        issues.extend(debug_issues)
         
         return issues
     
@@ -356,10 +368,11 @@ class BrowserDetector(BaseDetector):
         """Check user agent for automation indicators."""
         issues = []
         
-        if not trace.request or not trace.request.headers:
+        request = self._get_request_data(trace)
+        if not request or not request.headers:
             return issues
         
-        user_agent = self._get_header_value(trace.request.headers, 'user-agent')
+        user_agent = self._get_header_value(request.headers, 'user-agent')
         if not user_agent:
             return issues
         
@@ -381,11 +394,12 @@ class BrowserDetector(BaseDetector):
         """Check for automation-revealing headers."""
         issues = []
         
-        if not trace.request or not trace.request.headers:
+        request = self._get_request_data(trace)
+        if not request or not request.headers:
             return issues
         
         automation_headers_found = []
-        for header in trace.request.headers:
+        for header in request.headers:
             header_name = header.get('name', '').lower()
             if any(auto_header in header_name for auto_header in self.automation_headers):
                 automation_headers_found.append(header)
@@ -399,10 +413,11 @@ class BrowserDetector(BaseDetector):
         """Check response content for automation detection messages."""
         issues = []
         
-        if not trace.response or not trace.response.body:
+        response = self._get_response_data(trace)
+        if not response or not response.body:
             return issues
         
-        response_body = str(trace.response.body).lower()
+        response_body = str(response.body).lower()
         
         for pattern in self.automation_patterns:
             if re.search(pattern, response_body, re.IGNORECASE):
@@ -415,10 +430,11 @@ class BrowserDetector(BaseDetector):
         """Check for browser fingerprinting attempts."""
         issues = []
         
-        if not trace.response or not trace.response.body:
+        response = self._get_response_data(trace)
+        if not response or not response.body:
             return issues
         
-        response_body = str(trace.response.body).lower()
+        response_body = str(response.body).lower()
         
         # Check for fingerprinting JavaScript
         fingerprinting_found = []
@@ -433,7 +449,7 @@ class BrowserDetector(BaseDetector):
         if 'canvas' in response_body and ('fingerprint' in response_body or 'toDataURL' in response_body):
             issues.append(self._create_canvas_fingerprinting_issue(trace))
         
-        if 'webgl' in response_body and ('getParameter' in response_body or 'getSupportedExtensions' in response_body):
+        if 'webgl' in response_body and ('getparameter' in response_body or 'getsupportedextensions' in response_body):
             issues.append(self._create_webgl_fingerprinting_issue(trace))
         
         return issues
@@ -442,12 +458,13 @@ class BrowserDetector(BaseDetector):
         """Check for anti-bot challenges."""
         issues = []
         
-        if not trace.response:
+        response = self._get_response_data(trace)
+        if not response:
             return issues
         
         # Check response status codes
-        if trace.response.status_code in [403, 429, 503]:
-            response_body = str(trace.response.body).lower() if trace.response.body else ""
+        if response.status_code in [403, 429, 503]:
+            response_body = str(response.body).lower() if response.body else ""
             
             # Check for specific anti-bot services
             if any(pattern in response_body for pattern in ['cloudflare', 'captcha', 'challenge']):
@@ -459,10 +476,11 @@ class BrowserDetector(BaseDetector):
         """Check for suspicious JavaScript execution patterns."""
         issues = []
         
-        if not trace.request:
+        request = self._get_request_data(trace)
+        if not request:
             return issues
         
-        url = trace.request.url.lower()
+        url = request.url.lower()
         
         # Check for JavaScript-based detection attempts
         if any(js_pattern in url for js_pattern in ['detect.js', 'fingerprint.js', 'bot-detection.js']):
@@ -556,8 +574,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Suspicious User Agent Detected",
             description=f"User agent contains automation tool indicator: '{suspicious_term}'",
-            category=IssueCategory.BROWSER_CONFIG,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.BROWSER_AUTOMATION,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
@@ -587,8 +605,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Unusual User Agent Pattern",
             description="User agent has unusual characteristics that may indicate automation",
-            category=IssueCategory.BROWSER_CONFIG,
-            severity=SeverityLevel.LOW,
+            category=IssueCategory.BROWSER_AUTOMATION,
+            severity=SeverityLevel.HIGH,
             confidence=DetectionConfidence.MEDIUM,
             evidence=evidence,
             metadata={
@@ -620,8 +638,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Automation Headers Detected",
             description=f"Request contains {len(automation_headers)} automation-revealing headers",
-            category=IssueCategory.BROWSER_CONFIG,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.BROWSER_AUTOMATION,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
@@ -650,8 +668,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Browser Automation Detected by Target Service",
             description=f"Target service has detected browser automation. Pattern: {pattern}",
-            category=IssueCategory.BROWSER_CONFIG,
-            severity=SeverityLevel.HIGH,
+            category=IssueCategory.BROWSER_AUTOMATION,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
@@ -685,8 +703,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Browser Fingerprinting Detected",
             description=f"Browser fingerprinting techniques detected: {', '.join(fingerprinting_patterns)}",
-            category=IssueCategory.JAVASCRIPT_FINGERPRINT,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.MEDIUM,
             evidence=evidence,
             metadata={
@@ -716,8 +734,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Canvas Fingerprinting Detected",
             description="Canvas-based fingerprinting technique detected in response",
-            category=IssueCategory.CANVAS_FINGERPRINT,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
@@ -746,8 +764,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="WebGL Fingerprinting Detected",
             description="WebGL-based fingerprinting technique detected in response",
-            category=IssueCategory.JAVASCRIPT_FINGERPRINT,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
@@ -764,26 +782,29 @@ class BrowserDetector(BaseDetector):
     
     def _create_antibot_challenge_issue(self, trace: NetworkTrace) -> Issue:
         """Create issue for anti-bot challenge."""
+        response = self._get_response_data(trace)
+        status_code = response.status_code if response else 0
+        
         evidence = [
             self._create_evidence(
                 "antibot_response",
                 "Anti-bot challenge response",
-                f"Status: {trace.response.status_code}",
+                f"Status: {status_code}",
                 metadata={"trace_id": trace.trace_id}
             )
         ]
         
         return self._create_issue(
             title="Anti-Bot Challenge Triggered",
-            description=f"Anti-bot protection triggered (HTTP {trace.response.status_code})",
-            category=IssueCategory.BROWSER_CONFIG,
-            severity=SeverityLevel.HIGH,
+            description=f"Anti-bot protection triggered (HTTP {status_code})",
+            category=IssueCategory.BROWSER_AUTOMATION,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "anti_bot_challenge",
                 "trace_id": trace.trace_id,
-                "status_code": trace.response.status_code
+                "status_code": status_code
             },
             remediation_suggestions=[
                 "Implement CAPTCHA solving",
@@ -795,26 +816,32 @@ class BrowserDetector(BaseDetector):
     
     def _create_js_detection_issue(self, trace: NetworkTrace) -> Issue:
         """Create issue for JavaScript-based detection."""
+        request = self._get_request_data(trace)
+        url = request.url if request else "unknown"
+        
         evidence = [
             self._create_evidence(
                 "js_detection_url",
                 "JavaScript detection script URL",
-                trace.request.url,
+                url,
                 metadata={"trace_id": trace.trace_id}
             )
         ]
         
+        # Extract filename from URL for description
+        filename = url.split('/')[-1] if '/' in url else url
+        
         return self._create_issue(
             title="JavaScript-Based Detection Script",
-            description="Request to JavaScript script designed for bot detection",
-            category=IssueCategory.JAVASCRIPT_FINGERPRINT,
-            severity=SeverityLevel.MEDIUM,
-            confidence=DetectionConfidence.MEDIUM,
+            description=f"Request to JavaScript script designed for bot detection: {filename}",
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "browser_fingerprinting",
                 "trace_id": trace.trace_id,
-                "detection_url": trace.request.url
+                "detection_url": url
             },
             remediation_suggestions=[
                 "Block detection scripts",
@@ -822,6 +849,546 @@ class BrowserDetector(BaseDetector):
                 "Modify JavaScript execution environment"
             ]
         )
+    
+    # Issue creation methods for new categories
+    def _create_api_key_exposure_issue(self, trace: NetworkTrace, url: str) -> Issue:
+        """Create issue for API key exposure in URL."""
+        evidence = [
+            self._create_evidence(
+                "api_key_in_url",
+                "API key exposed in URL parameters",
+                url,
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="API Key Exposed in URL",
+            description="Sensitive API key found in URL parameters",
+            category=IssueCategory.DATA_EXPOSURE,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "api_key_exposure",
+                "trace_id": trace.trace_id,
+                "exposure_location": "url_parameters"
+            },
+            remediation_suggestions=[
+                "Move API keys to request headers",
+                "Use secure authentication methods",
+                "Implement proper key management"
+            ]
+        )
+    
+    def _create_sensitive_param_exposure_issue(self, trace: NetworkTrace, url: str) -> Issue:
+        """Create issue for sensitive parameter exposure."""
+        evidence = [
+            self._create_evidence(
+                "sensitive_params_in_url",
+                "Sensitive parameters exposed in URL",
+                url,
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Sensitive Data in URL Parameters",
+            description="Sensitive information (SSN, credit card, etc.) found in URL parameters",
+            category=IssueCategory.DATA_EXPOSURE,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "sensitive_param_exposure",
+                "trace_id": trace.trace_id,
+                "exposure_location": "url_parameters"
+            },
+            remediation_suggestions=[
+                "Use POST requests for sensitive data",
+                "Encrypt sensitive parameters",
+                "Implement proper data handling"
+            ]
+        )
+    
+    def _create_debug_param_exposure_issue(self, trace: NetworkTrace, url: str) -> Issue:
+        """Create issue for debug parameter exposure."""
+        evidence = [
+            self._create_evidence(
+                "debug_params_in_url",
+                "Debug parameters exposed in URL",
+                url,
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Debug Parameters in Production URL",
+            description="Debug parameters found in URL that may expose sensitive information",
+            category=IssueCategory.DEBUG_LEAKAGE,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "debug_param_exposure",
+                "trace_id": trace.trace_id,
+                "exposure_location": "url_parameters"
+            },
+            remediation_suggestions=[
+                "Remove debug parameters from production",
+                "Use environment-specific configurations",
+                "Implement proper debug controls"
+            ]
+        )
+    
+    def _create_pii_exposure_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for PII exposure in response."""
+        evidence = [
+            self._create_evidence(
+                "pii_in_response",
+                "Personal Identifiable Information in response body",
+                "PII detected in response content",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Personal Information Exposed in Response",
+            description="Personal identifiable information (PII) found in response body",
+            category=IssueCategory.DATA_EXPOSURE,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "pii_exposure",
+                "trace_id": trace.trace_id,
+                "exposure_location": "response_body"
+            },
+            remediation_suggestions=[
+                "Implement data masking",
+                "Use proper access controls",
+                "Encrypt sensitive data in responses"
+            ]
+        )
+    
+    def _create_internal_data_exposure_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for internal data exposure."""
+        evidence = [
+            self._create_evidence(
+                "internal_data_in_response",
+                "Internal system data in response body",
+                "Internal data detected in response content",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Internal System Data Exposed",
+            description="Internal system data found in response that should not be public",
+            category=IssueCategory.DATA_EXPOSURE,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "internal_data_exposure",
+                "trace_id": trace.trace_id,
+                "exposure_location": "response_body"
+            },
+            remediation_suggestions=[
+                "Filter internal data from responses",
+                "Implement proper data sanitization",
+                "Use response filtering mechanisms"
+            ]
+        )
+    
+    def _create_tracking_request_issue(self, trace: NetworkTrace, url: str) -> Issue:
+        """Create issue for tracking request."""
+        evidence = [
+            self._create_evidence(
+                "tracking_request_url",
+                "Request to tracking/analytics service",
+                url,
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Third-Party Tracking Request",
+            description="Request made to third-party tracking or analytics service",
+            category=IssueCategory.TRACKING,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "tracking_request",
+                "trace_id": trace.trace_id,
+                "tracking_url": url
+            },
+            remediation_suggestions=[
+                "Block tracking requests",
+                "Use privacy-focused alternatives",
+                "Implement consent management"
+            ]
+        )
+    
+    def _create_fingerprint_collection_issue(self, trace: NetworkTrace, url: str) -> Issue:
+        """Create issue for fingerprint collection."""
+        evidence = [
+            self._create_evidence(
+                "fingerprint_collection_url",
+                "Request to fingerprint collection service",
+                url,
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Browser Fingerprint Collection",
+            description="Request made to service that collects browser fingerprints",
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "fingerprint_collection",
+                "trace_id": trace.trace_id,
+                "collection_url": url
+            },
+            remediation_suggestions=[
+                "Block fingerprint collection requests",
+                "Use fingerprint spoofing",
+                "Implement privacy protection"
+            ]
+        )
+    
+    def _create_comprehensive_tracking_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for comprehensive tracking."""
+        evidence = [
+            self._create_evidence(
+                "comprehensive_tracking_data",
+                "Comprehensive user tracking data in request",
+                "Extensive user tracking detected",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Comprehensive User Tracking",
+            description="Extensive user tracking data being sent to third-party service",
+            category=IssueCategory.TRACKING,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "comprehensive_tracking",
+                "trace_id": trace.trace_id,
+                "tracking_type": "comprehensive"
+            },
+            remediation_suggestions=[
+                "Disable comprehensive tracking",
+                "Use privacy-focused browsing",
+                "Block tracking scripts"
+            ]
+        )
+    
+    def _create_behavioral_tracking_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for behavioral tracking."""
+        evidence = [
+            self._create_evidence(
+                "behavioral_tracking_data",
+                "Behavioral tracking data in request",
+                "User behavior tracking detected",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Behavioral Tracking Detected",
+            description="User behavioral data being tracked and transmitted",
+            category=IssueCategory.TRACKING,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "behavioral_tracking",
+                "trace_id": trace.trace_id,
+                "tracking_type": "behavioral"
+            },
+            remediation_suggestions=[
+                "Disable behavioral tracking",
+                "Use script blockers",
+                "Enable privacy mode"
+            ]
+        )
+    
+    def _create_tracking_cookies_issue(self, trace: NetworkTrace, cookies: List[str]) -> Issue:
+        """Create issue for tracking cookies."""
+        evidence = [
+            self._create_evidence(
+                "tracking_cookies",
+                "Tracking cookies set by response",
+                f"{len(cookies)} tracking cookies detected",
+                metadata={"trace_id": trace.trace_id, "cookie_count": len(cookies)}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Tracking Cookies Set",
+            description=f"Response sets {len(cookies)} tracking cookies for user monitoring",
+            category=IssueCategory.TRACKING,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "tracking_cookies",
+                "trace_id": trace.trace_id,
+                "cookie_count": len(cookies)
+            },
+            remediation_suggestions=[
+                "Block tracking cookies",
+                "Use cookie management tools",
+                "Enable privacy protection"
+            ]
+        )
+    
+    def _create_debug_headers_issue(self, trace: NetworkTrace, headers: List[Dict[str, str]]) -> Issue:
+        """Create issue for debug headers."""
+        evidence = []
+        for header in headers:
+            evidence.append(self._create_evidence(
+                "debug_header",
+                f"Debug header: {header.get('name')}",
+                f"{header.get('name')}: {header.get('value')}",
+                metadata={"trace_id": trace.trace_id}
+            ))
+        
+        return self._create_issue(
+            title="Debug Information in Response Headers",
+            description=f"Response contains {len(headers)} debug headers exposing system information",
+            category=IssueCategory.DEBUG_LEAKAGE,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "debug_headers",
+                "trace_id": trace.trace_id,
+                "header_count": len(headers)
+            },
+            remediation_suggestions=[
+                "Remove debug headers from production",
+                "Implement proper header filtering",
+                "Use environment-specific configurations"
+            ]
+        )
+    
+    def _create_debug_mode_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for debug mode detection."""
+        evidence = [
+            self._create_evidence(
+                "debug_mode_indicator",
+                "Debug mode indicator in response",
+                "Debug mode detected in response content",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Debug Mode Enabled in Production",
+            description="Application appears to be running in debug mode in production environment",
+            category=IssueCategory.DEBUG_LEAKAGE,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "debug_mode_enabled",
+                "trace_id": trace.trace_id,
+                "debug_type": "application_debug"
+            },
+            remediation_suggestions=[
+                "Disable debug mode in production",
+                "Use environment-specific configurations",
+                "Implement proper deployment practices"
+            ]
+        )
+    
+    def _create_system_info_leakage_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for system information leakage."""
+        evidence = [
+            self._create_evidence(
+                "system_info_leakage",
+                "System information in response",
+                "Internal system information detected",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="System Information Leakage",
+            description="Response contains internal system information that should not be exposed",
+            category=IssueCategory.DEBUG_LEAKAGE,
+            severity=SeverityLevel.HIGH,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "system_info_leakage",
+                "trace_id": trace.trace_id,
+                "leakage_type": "system_metrics"
+            },
+            remediation_suggestions=[
+                "Filter system information from responses",
+                "Implement proper error handling",
+                "Use production-safe logging"
+            ]
+        )
+    
+    def _create_admin_token_leakage_issue(self, trace: NetworkTrace) -> Issue:
+        """Create issue for admin token leakage."""
+        evidence = [
+            self._create_evidence(
+                "admin_token_leakage",
+                "Admin/internal token in response",
+                "Administrative token detected in response",
+                metadata={"trace_id": trace.trace_id}
+            )
+        ]
+        
+        return self._create_issue(
+            title="Administrative Token Exposed",
+            description="Response contains administrative or internal tokens that should be protected",
+            category=IssueCategory.DEBUG_LEAKAGE,
+            severity=SeverityLevel.CRITICAL,
+            confidence=DetectionConfidence.HIGH,
+            evidence=evidence,
+            metadata={
+                "rule_id": "admin_token_leakage",
+                "trace_id": trace.trace_id,
+                "token_type": "administrative"
+            },
+            remediation_suggestions=[
+                "Remove tokens from responses",
+                "Implement proper token management",
+                "Use secure authentication methods"
+            ]
+        )
+    
+    def _check_data_exposure(self, trace: NetworkTrace) -> List[Issue]:
+        """Check for sensitive data exposure in requests/responses."""
+        issues = []
+        
+        request = self._get_request_data(trace)
+        response = self._get_response_data(trace)
+        
+        # Check request URL for sensitive data
+        if request and request.url:
+            url_lower = request.url.lower()
+            
+            # Check for API keys in URL
+            if any(pattern in url_lower for pattern in ['api_key=', 'apikey=', 'key=', 'token=']):
+                issues.append(self._create_api_key_exposure_issue(trace, request.url))
+            
+            # Check for sensitive parameters
+            if any(pattern in url_lower for pattern in ['ssn=', 'social_security=', 'credit_card=', 'password=']):
+                issues.append(self._create_sensitive_param_exposure_issue(trace, request.url))
+            
+            # Check for debug parameters
+            if any(pattern in url_lower for pattern in ['debug=1', 'debug=true', 'include_sensitive=true']):
+                issues.append(self._create_debug_param_exposure_issue(trace, request.url))
+        
+        # Check response body for sensitive data
+        if response and response.body:
+            response_body = str(response.body).lower()
+            
+            # Check for PII in response
+            if any(pattern in response_body for pattern in ['ssn', 'social security', 'credit_card', 'bank_account']):
+                issues.append(self._create_pii_exposure_issue(trace))
+            
+            # Check for internal data exposure
+            if any(pattern in response_body for pattern in ['internal_user_id', 'internal_api_key', 'admin_notes']):
+                issues.append(self._create_internal_data_exposure_issue(trace))
+        
+        return issues
+    
+    def _check_tracking_indicators(self, trace: NetworkTrace) -> List[Issue]:
+        """Check for tracking and analytics indicators."""
+        issues = []
+        
+        request = self._get_request_data(trace)
+        response = self._get_response_data(trace)
+        
+        # Check for tracking URLs
+        if request and request.url:
+            url_lower = request.url.lower()
+            
+            # Check for analytics/tracking domains
+            tracking_domains = ['analytics', 'tracking', 'third-party-tracker', 'google-analytics', 'facebook']
+            if any(domain in url_lower for domain in tracking_domains):
+                issues.append(self._create_tracking_request_issue(trace, request.url))
+            
+            # Check for fingerprinting collection URLs
+            if 'fingerprint' in url_lower or 'collect' in url_lower:
+                issues.append(self._create_fingerprint_collection_issue(trace, request.url))
+        
+        # Check request body for comprehensive tracking data
+        if request and hasattr(request, 'body') and request.body:
+            request_body = str(request.body).lower()
+            
+            # Check for comprehensive user tracking
+            if 'comprehensive_tracking' in request_body or 'user_identification' in request_body:
+                issues.append(self._create_comprehensive_tracking_issue(trace))
+            
+            # Check for behavioral analysis
+            if 'behavioral_analysis' in request_body or 'mouse_movements' in request_body:
+                issues.append(self._create_behavioral_tracking_issue(trace))
+        
+        # Check response headers for tracking cookies
+        if response and response.headers:
+            tracking_cookies = []
+            for header in response.headers:
+                if header.get('name', '').lower() == 'set-cookie':
+                    cookie_value = header.get('value', '').lower()
+                    if any(pattern in cookie_value for pattern in ['tracking', 'analytics', '_ga', 'fb_pixel']):
+                        tracking_cookies.append(header.get('value'))
+            
+            if tracking_cookies:
+                issues.append(self._create_tracking_cookies_issue(trace, tracking_cookies))
+        
+        return issues
+    
+    def _check_debug_leakage(self, trace: NetworkTrace) -> List[Issue]:
+        """Check for debug information leakage."""
+        issues = []
+        
+        request = self._get_request_data(trace)
+        response = self._get_response_data(trace)
+        
+        # Check response headers for debug information
+        if response and response.headers:
+            debug_headers = []
+            for header in response.headers:
+                header_name = header.get('name', '').lower()
+                if any(pattern in header_name for pattern in ['debug', 'x-debug', 'x-database', 'x-memory', 'x-execution']):
+                    debug_headers.append(header)
+            
+            if debug_headers:
+                issues.append(self._create_debug_headers_issue(trace, debug_headers))
+        
+        # Check response body for debug information
+        if response and response.body:
+            response_body = str(response.body).lower()
+            
+            # Check for debug mode indicators
+            if 'debug mode' in response_body or 'debug_mode' in response_body:
+                issues.append(self._create_debug_mode_issue(trace))
+            
+            # Check for internal system information
+            if any(pattern in response_body for pattern in ['database queries', 'memory usage', 'execution time']):
+                issues.append(self._create_system_info_leakage_issue(trace))
+            
+            # Check for admin/internal tokens
+            if any(pattern in response_body for pattern in ['admin_token', 'debug_token', 'internal_key']):
+                issues.append(self._create_admin_token_leakage_issue(trace))
+        
+        return issues
     
     def _create_consistent_automation_detection_issue(
         self, 
@@ -844,7 +1411,7 @@ class BrowserDetector(BaseDetector):
             title="Consistent Automation Detection",
             description=f"Browser automation detected in {detection_rate:.1%} of requests "
                        f"({detection_count} out of {total_requests})",
-            category=IssueCategory.BROWSER_CONFIG,
+            category=IssueCategory.BROWSER_AUTOMATION,
             severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
@@ -876,8 +1443,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Multiple Browser Fingerprinting Attempts",
             description=f"Detected {len(traces)} fingerprinting attempts across session",
-            category=IssueCategory.JAVASCRIPT_FINGERPRINT,
-            severity=SeverityLevel.HIGH,
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.CRITICAL,
             confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
@@ -910,8 +1477,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="Robotic Request Timing Pattern",
             description=f"Requests show robotic timing pattern (avg: {avg_interval:.2f}s, variance: {variance:.4f})",
-            category=IssueCategory.BROWSER_CONFIG,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.BROWSER_AUTOMATION,
+            severity=SeverityLevel.HIGH,
             confidence=DetectionConfidence.MEDIUM,
             evidence=evidence,
             metadata={
@@ -1164,8 +1731,8 @@ class BrowserDetector(BaseDetector):
         return self._create_issue(
             title="JavaScript-Based Detection Script",
             description=f"Request to JavaScript script designed for bot detection: {filename}",
-            category=IssueCategory.JAVASCRIPT_FINGERPRINT,
-            severity=SeverityLevel.MEDIUM,
+            category=IssueCategory.FINGERPRINTING,
+            severity=SeverityLevel.HIGH,
             confidence=DetectionConfidence.HIGH,  # Increased confidence for reliable URL-based detection
             evidence=evidence,
             metadata={

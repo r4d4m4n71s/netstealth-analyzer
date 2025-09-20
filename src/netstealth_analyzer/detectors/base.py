@@ -445,3 +445,131 @@ class BaseDetector(IDetector):
             stats['issue_detection_rate'] = (stats['issues_found'] / stats['traces_analyzed']) * 100
         else:
             stats['issue_detection_rate'] = 0
+    
+    def _get_request_data(self, trace: NetworkTrace):
+        """
+        Extract request data from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract request data from
+            
+        Returns:
+            Request data object or None if not available
+        """
+        # First check for direct trace.request access (test mocks and legacy)
+        if hasattr(trace, 'request') and trace.request:
+            return trace.request
+        
+        # Try new protocol-aware architecture
+        if hasattr(trace, 'is_http') and callable(trace.is_http) and trace.is_http():
+            if hasattr(trace, 'http_data') and trace.http_data and hasattr(trace.http_data, 'request'):
+                return trace.http_data.request
+        
+        return None
+    
+    def _get_response_data(self, trace: NetworkTrace):
+        """
+        Extract response data from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract response data from
+            
+        Returns:
+            Response data object or None if not available
+        """
+        # First check for direct trace.response access (test mocks and legacy)
+        if hasattr(trace, 'response') and trace.response:
+            return trace.response
+        
+        # Try new protocol-aware architecture
+        if hasattr(trace, 'is_http') and callable(trace.is_http) and trace.is_http():
+            if hasattr(trace, 'http_data') and trace.http_data and hasattr(trace.http_data, 'response'):
+                return trace.http_data.response
+        
+        return None
+    
+    def _get_timing_data(self, trace: NetworkTrace):
+        """
+        Extract timing data from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract timing data from
+            
+        Returns:
+            Timing data object or None if not available
+        """
+        if trace.is_http() and trace.http_data:
+            return trace.http_data.timing
+        return None
+    
+    def _has_http_data(self, trace: NetworkTrace) -> bool:
+        """
+        Check if trace has HTTP request/response data.
+        
+        Args:
+            trace: Network trace to check
+            
+        Returns:
+            True if trace has HTTP data, False otherwise
+        """
+        return trace.is_http() and trace.http_data is not None
+    
+    def _get_headers_from_trace(self, trace: NetworkTrace) -> List[Dict[str, str]]:
+        """
+        Extract headers from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract headers from
+            
+        Returns:
+            List of header dictionaries or empty list if not available
+        """
+        request = self._get_request_data(trace)
+        if request and request.headers:
+            return request.headers
+        return []
+    
+    def _get_response_body(self, trace: NetworkTrace) -> Optional[str]:
+        """
+        Extract response body from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract response body from
+            
+        Returns:
+            Response body string or None if not available
+        """
+        response = self._get_response_data(trace)
+        if response and response.body:
+            return str(response.body)
+        return None
+    
+    def _get_status_code(self, trace: NetworkTrace) -> Optional[int]:
+        """
+        Extract status code from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract status code from
+            
+        Returns:
+            Status code integer or None if not available
+        """
+        response = self._get_response_data(trace)
+        if response:
+            return response.status_code
+        return None
+    
+    def _get_request_url(self, trace: NetworkTrace) -> Optional[str]:
+        """
+        Extract request URL from trace based on protocol.
+        
+        Args:
+            trace: Network trace to extract URL from
+            
+        Returns:
+            Request URL string or None if not available
+        """
+        request = self._get_request_data(trace)
+        if request:
+            return request.url
+        return None

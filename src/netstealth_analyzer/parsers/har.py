@@ -12,9 +12,10 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 from .base import BaseLogParser, ParseResult
-from ..models.enums import LogFormat
-from ..models.network import NetworkTrace, HttpRequest, HttpResponse, TimingInfo
+from ..models.enums import LogFormat, NetworkProtocol
+from ..models.network import NetworkTrace, HttpTrace, HttpRequest, HttpResponse, TimingInfo, HttpData
 from ..core.events import EventBus
+from .registry import ProtocolParserRegistry
 
 
 class HarParser(BaseLogParser):
@@ -276,7 +277,7 @@ class HarParser(BaseLogParser):
                 status_text=response_data.get('statusText', ''),
                 headers=self._normalize_headers(response_data.get('headers', [])),
                 body=self._extract_response_body(response_data.get('content', {})),
-                size=response_data.get('bodySize', 0),
+                body_size=response_data.get('bodySize', 0),
             )
             
             # Create timing info
@@ -290,9 +291,18 @@ class HarParser(BaseLogParser):
                 blocked=timings.get('blocked', -1),
             )
             
-            # Create network trace with HTTP data in metadata
+            # Create HttpData for protocol-specific data
+            http_data = HttpData(
+                request=request,
+                response=response,
+                timing=timing
+            )
+            
+            # Create NetworkTrace with protocol-specific data
             trace = NetworkTrace(
                 trace_id=f"har_{index}",
+                protocol=NetworkProtocol.HTTP,
+                protocol_data=http_data,  # Use protocol_data for new architecture
                 metadata={
                     'source_format': LogFormat.HAR.value,
                     'entry_index': index,
@@ -305,11 +315,33 @@ class HarParser(BaseLogParser):
                         self._has_proxy_headers(request.headers) or 
                         self._has_proxy_headers(response.headers)
                     ),
-                    # Store HTTP data in metadata
-                    'http_request': request.model_dump(),
-                    'http_response': response.model_dump(),
-                    'http_timing': timing.model_dump(),
                     'timestamp': request.timestamp.isoformat() if request.timestamp else None,
+                    # Add backward compatibility for tests
+                    'http_request': {
+                        'method': request.method,
+                        'url': request.url,
+                        'headers': request.headers,
+                        'body': request.body
+                    },
+                    'http_response': {
+                        'status_code': response.status_code,
+                        'status_text': response.status_text,
+                        'headers': response.headers,
+                        'body': response.body,
+                        'body_size': response.body_size
+                    },
+                    'http_timing': {
+                        'dns_lookup': timing.dns_lookup,
+                        'tcp_connect': timing.tcp_connect,
+                        'ssl_handshake': timing.ssl_handshake,
+                        'request_sent': timing.request_sent,
+                        'waiting': timing.waiting,
+                        'content_download': timing.content_download,
+                        'blocked': timing.blocked,
+                        'total_time': (timing.dns_lookup + timing.tcp_connect + 
+                                     timing.ssl_handshake + timing.request_sent + 
+                                     timing.waiting + timing.content_download)
+                    }
                 }
             )
             

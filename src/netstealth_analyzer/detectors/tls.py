@@ -35,8 +35,8 @@ class TlsDetector(BaseDetector):
             'TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384'
         ]
         
-        # Weak/deprecated elements
-        self.weak_tls_versions = ['SSLv2', 'SSLv3', 'TLSv1.0', 'TLSv1.1']
+        # Weak/deprecated elements - map enum values to strings for comparison
+        self.weak_tls_versions = ['ssl_2.0', 'ssl_3.0', 'tls_1.0', 'tls_1.1', 'SSLv2', 'SSLv3', 'TLSv1.0', 'TLSv1.1']
         self.weak_cipher_suites = [
             'TLS_RSA_WITH_RC4_128_MD5',
             'TLS_RSA_WITH_RC4_128_SHA',
@@ -87,8 +87,8 @@ class TlsDetector(BaseDetector):
                 pattern=r"(expired|invalid|untrusted|self-signed)",
                 description="Certificate has security or trust issues",
                 category=IssueCategory.TLS_FINGERPRINT,
-                severity=SeverityLevel.LOW,
-                confidence=DetectionConfidence.MEDIUM
+                severity=SeverityLevel.HIGH,
+                confidence=DetectionConfidence.HIGH
             ),
             DetectionRule(
                 id="tls_automation_signature",
@@ -140,7 +140,7 @@ class TlsDetector(BaseDetector):
             DetectionResult with found TLS issues and statistics
         """
         start_time = time.time()
-        self._emit_progress("tls_detection_started", {"traces": len(context.network_traces)})
+        await self._emit_progress("tls_detection_started", {"traces": len(context.network_traces)})
         
         # Initialize results
         issues = []
@@ -159,7 +159,11 @@ class TlsDetector(BaseDetector):
                     
                     # Track rules applied
                     for issue in trace_issues:
-                        rule_id = issue.metadata.get('rule_id')
+                        # Extract rule_id from issue raw_data (this is where we store it)
+                        rule_id = None
+                        if hasattr(issue, 'raw_data') and isinstance(issue.raw_data, dict):
+                            rule_id = issue.raw_data.get('rule_id')
+                        
                         if rule_id and rule_id not in [r.id for r in rules_applied]:
                             rule = next((r for r in self._detection_rules if r.id == rule_id), None)
                             if rule:
@@ -167,7 +171,7 @@ class TlsDetector(BaseDetector):
                     
                     # Emit progress every 100 traces
                     if (trace_idx + 1) % 100 == 0:
-                        self._emit_progress("tls_traces_processed", {
+                        await self._emit_progress("tls_traces_processed", {
                             "processed": trace_idx + 1,
                             "total": len(context.network_traces),
                             "issues_found": len(issues)
@@ -189,7 +193,7 @@ class TlsDetector(BaseDetector):
             # Filter issues by confidence threshold
             high_confidence_issues = [
                 i for i in issues 
-                if i.confidence.numeric_value >= context.confidence_threshold
+                if i.confidence >= context.confidence_threshold
             ]
             
             # Finalize statistics
@@ -206,7 +210,7 @@ class TlsDetector(BaseDetector):
                 errors=errors
             )
             
-            self._emit_progress("tls_detection_completed", {
+            await self._emit_progress("tls_detection_completed", {
                 "issues_found": len(high_confidence_issues),
                 "processing_time_ms": statistics['processing_time_ms']
             })
@@ -214,7 +218,7 @@ class TlsDetector(BaseDetector):
             return result
             
         except Exception as e:
-            self._emit_progress("tls_detection_failed", {"error": str(e)})
+            await self._emit_progress("tls_detection_failed", {"error": str(e)})
             raise RuntimeError(f"TLS detection failed: {e}")
     
     async def _analyze_trace_tls(
@@ -236,7 +240,7 @@ class TlsDetector(BaseDetector):
         
         # Get TLS information from connection info or metadata
         tls_info = None
-        if hasattr(trace, 'connection_info') and trace.connection_info:
+        if hasattr(trace, 'connection_info') and trace.connection_info and hasattr(trace.connection_info, 'tls_info') and trace.connection_info.tls_info:
             tls_info = trace.connection_info.tls_info
         elif hasattr(trace, 'tls_info'):
             tls_info = trace.tls_info
@@ -245,8 +249,10 @@ class TlsDetector(BaseDetector):
             return issues
         
         # Check for weak TLS versions
-        if tls_info.version and str(tls_info.version) in self.weak_tls_versions:
-            issues.append(self._create_weak_tls_version_issue(trace, tls_info))
+        if tls_info.version:
+            version_str = tls_info.version.value if hasattr(tls_info.version, 'value') else str(tls_info.version)
+            if version_str in self.weak_tls_versions:
+                issues.append(self._create_weak_tls_version_issue(trace, tls_info))
         
         # Check for weak cipher suites
         if tls_info.cipher_suite and any(
@@ -256,7 +262,7 @@ class TlsDetector(BaseDetector):
             issues.append(self._create_weak_cipher_issue(trace, tls_info))
         
         # Check for certificate issues
-        if tls_info.certificate_issues:
+        if hasattr(tls_info, 'certificate_issues') and tls_info.certificate_issues:
             issues.append(self._create_certificate_issue(trace, tls_info))
         
         # Check for fingerprinting risks
@@ -316,27 +322,29 @@ class TlsDetector(BaseDetector):
     
     def _create_weak_tls_version_issue(self, trace: NetworkTrace, tls_info: TLSInfo) -> Issue:
         """Create issue for weak TLS version."""
+        version_str = tls_info.version.value if hasattr(tls_info.version, 'value') else str(tls_info.version)
+        
         evidence = [
             self._create_evidence(
                 "tls_version",
                 "Detected TLS version",
-                str(tls_info.version),
+                version_str,
                 metadata={"trace_id": trace.trace_id}
             )
         ]
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="Weak TLS Version Detected",
-            description=f"Connection uses deprecated TLS version {tls_info.version}. "
+            description=f"Connection uses deprecated TLS version {version_str}. "
                        f"This version has known security vulnerabilities and should be avoided.",
             category=IssueCategory.TLS_FINGERPRINT,
             severity=SeverityLevel.HIGH,
-            confidence=DetectionConfidence.HIGH,
+            confidence=DetectionConfidence.VERY_HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "tls_weak_version",
                 "trace_id": trace.trace_id,
-                "tls_version": str(tls_info.version)
+                "tls_version": version_str
             },
             remediation_suggestions=[
                 "Upgrade to TLS 1.2 or higher",
@@ -344,6 +352,9 @@ class TlsDetector(BaseDetector):
                 "Use modern cipher suites"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_weak_version"
+        return issue
     
     def _create_weak_cipher_issue(self, trace: NetworkTrace, tls_info: TLSInfo) -> Issue:
         """Create issue for weak cipher suite."""
@@ -356,7 +367,7 @@ class TlsDetector(BaseDetector):
             )
         ]
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="Weak Cipher Suite Detected",
             description=f"Connection uses weak cipher suite {tls_info.cipher_suite}. "
                        f"This cipher has known vulnerabilities or provides insufficient security.",
@@ -375,6 +386,9 @@ class TlsDetector(BaseDetector):
                 "Prioritize strong cipher suites"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_weak_cipher"
+        return issue
     
     def _create_certificate_issue(self, trace: NetworkTrace, tls_info: TLSInfo) -> Issue:
         """Create issue for certificate problems."""
@@ -392,12 +406,12 @@ class TlsDetector(BaseDetector):
             for issue in tls_info.certificate_issues
         ) else SeverityLevel.MEDIUM
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="Certificate Security Issue",
             description=f"Certificate has the following issues: {', '.join(tls_info.certificate_issues)}",
             category=IssueCategory.TLS_FINGERPRINT,
             severity=severity,
-            confidence=DetectionConfidence.MEDIUM,
+            confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "tls_certificate_issue",
@@ -410,6 +424,9 @@ class TlsDetector(BaseDetector):
                 "Check certificate expiration date"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_certificate_issue"
+        return issue
     
     def _create_fingerprinting_risk_issue(
         self, 
@@ -434,13 +451,13 @@ class TlsDetector(BaseDetector):
                 str(tls_info.cipher_suite)
             ))
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="TLS Fingerprinting Risk",
             description=f"TLS configuration has unique characteristics that may allow fingerprinting "
                        f"(risk score: {risk_score:.2f}). This could be used to identify the client.",
             category=IssueCategory.TLS_FINGERPRINT,
             severity=SeverityLevel.MEDIUM,
-            confidence=DetectionConfidence.MEDIUM,
+            confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "tls_fingerprint_risk",
@@ -453,6 +470,9 @@ class TlsDetector(BaseDetector):
                 "Use TLS randomization tools"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_fingerprint_risk"
+        return issue
     
     def _create_automation_signature_issue(self, trace: NetworkTrace, tls_info: TLSInfo) -> Issue:
         """Create issue for automation signature detection."""
@@ -464,7 +484,7 @@ class TlsDetector(BaseDetector):
             )
         ]
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="Browser Automation Signature Detected",
             description="TLS handshake contains signatures that indicate automated browser usage. "
                        "This may trigger anti-automation defenses.",
@@ -482,6 +502,9 @@ class TlsDetector(BaseDetector):
                 "Use real browser profiles for TLS configuration"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_automation_signature"
+        return issue
     
     def _create_consistent_fingerprint_issue(
         self, 
@@ -498,13 +521,13 @@ class TlsDetector(BaseDetector):
             )
         ]
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="Suspicious TLS Fingerprint Consistency",
             description=f"TLS fingerprints are unusually consistent across {len(traces)} connections "
                        f"(consistency: {consistency_score:.2f}). This may indicate automation.",
             category=IssueCategory.TLS_FINGERPRINT,
             severity=SeverityLevel.MEDIUM,
-            confidence=DetectionConfidence.MEDIUM,
+            confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "tls_fingerprint_risk",
@@ -517,6 +540,9 @@ class TlsDetector(BaseDetector):
                 "Vary connection timing"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_fingerprint_risk"
+        return issue
     
     def _create_unusual_pattern_issue(
         self, 
@@ -532,12 +558,12 @@ class TlsDetector(BaseDetector):
             )
         ]
         
-        return self._create_issue(
+        issue = self._create_issue(
             title="Unusual TLS Handshake Patterns",
             description=f"Detected unusual patterns in TLS handshakes: {', '.join(patterns)}",
             category=IssueCategory.TLS_FINGERPRINT,
             severity=SeverityLevel.LOW,
-            confidence=DetectionConfidence.MEDIUM,
+            confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "tls_fingerprint_risk",
@@ -550,6 +576,9 @@ class TlsDetector(BaseDetector):
                 "Test with different TLS libraries"
             ]
         )
+        # Store rule_id in raw_data for tracking
+        issue.raw_data["rule_id"] = "tls_fingerprint_risk"
+        return issue
     
     def _assess_fingerprinting_risk(self, tls_info: TLSInfo) -> float:
         """
@@ -565,8 +594,8 @@ class TlsDetector(BaseDetector):
         
         # Check for unusual cipher combinations
         if tls_info.cipher_suite:
-            cipher_str = str(tls_info.cipher_suite)
-            if any(pattern in cipher_str for pattern in self.ja3_fingerprint_patterns):
+            cipher_str = str(tls_info.cipher_suite).lower()
+            if any(pattern.lower() in cipher_str for pattern in self.ja3_fingerprint_patterns):
                 risk_factors.append(0.8)
         
         # Check for unusual extension combinations
@@ -581,7 +610,7 @@ class TlsDetector(BaseDetector):
                 risk_factors.append(0.4)
         
         # Check for very fast handshake (might indicate caching/automation)
-        if tls_info.handshake_duration_ms and tls_info.handshake_duration_ms < 10:
+        if tls_info.handshake_duration_ms is not None and tls_info.handshake_duration_ms < 10:
             risk_factors.append(0.5)
         
         return max(risk_factors) if risk_factors else 0.0

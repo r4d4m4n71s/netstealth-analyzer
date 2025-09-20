@@ -126,6 +126,7 @@ def __init__()
 #### Component Configuration Methods
 - `with_parser(parser: ILogParser) -> AnalyzerBuilder` - Add custom parser component
 - `with_detector(detector: IDetector) -> AnalyzerBuilder` - Add custom detector component
+- `with_detectors(*detector_names: str) -> AnalyzerBuilder` - Add multiple detectors by name from registry
 - `with_reporter(reporter: IReporter) -> AnalyzerBuilder` - Add custom reporter component
 - `with_plugin(plugin: IComponent) -> AnalyzerBuilder` - Add plugin component
 

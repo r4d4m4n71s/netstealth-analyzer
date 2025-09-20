@@ -739,7 +739,7 @@ class TestAnalyzerBuilderBuild:
         """Test building with event handlers."""
         with patch('netstealth_analyzer.builder.get_event_bus') as mock_get_bus:
             mock_event_bus = Mock(spec=EventBus)
-            mock_event_bus.on = Mock()
+            mock_event_bus.subscribe = Mock()
             mock_get_bus.return_value = mock_event_bus
             
             with patch('netstealth_analyzer.builder.NetStealthAnalyzer'):
@@ -752,7 +752,7 @@ class TestAnalyzerBuilderBuild:
                 builder.build()
                 
                 # Verify event handler was registered
-                mock_event_bus.on.assert_called_once_with(AnalysisEvent.ANALYSIS_STARTED, handler)
+                mock_event_bus.subscribe.assert_called_once_with(AnalysisEvent.ANALYSIS_STARTED, handler)
 
     def test_build_validation_failure(self):
         """Test build failure due to validation error."""

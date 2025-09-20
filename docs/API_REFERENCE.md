@@ -97,20 +97,20 @@ analyzer.for_service(["example.com", "api.service.com"])
 
 **Returns**: `AnalyzerBuilder` for method chaining
 
-##### `with_detectors(detectors: Union[str, List[str]]) -> AnalyzerBuilder`
+##### `with_detectors(*detector_names: str) -> AnalyzerBuilder`
 
-Configure which detectors to use.
+Configure which detectors to use by name from the global registry.
 
 ```python
-# All detectors (default)
-analyzer.with_detectors("all")
-
 # Specific detectors
-analyzer.with_detectors(["proxy", "browser", "network"])
+analyzer.with_detectors("proxy", "browser", "network")
+
+# Single detector
+analyzer.with_detectors("proxy")
 ```
 
 **Parameters**:
-- `detectors`: Detector names or "all"
+- `*detector_names`: Variable number of detector names
 
 **Available Detectors**:
 - `"proxy"`: Proxy detection
@@ -119,6 +119,8 @@ analyzer.with_detectors(["proxy", "browser", "network"])
 - `"tls"`: TLS analysis
 
 **Returns**: `AnalyzerBuilder` for method chaining
+
+**Note**: This method creates detector instances from the global detector registry and adds them using `with_detector()`.
 
 ##### `track_progress(callback: Callable[[AnalysisEvent, Any], None]) -> AnalyzerBuilder`
 

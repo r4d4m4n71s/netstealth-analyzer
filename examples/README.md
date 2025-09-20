@@ -8,39 +8,57 @@ This directory contains comprehensive examples demonstrating how to use NetSteal
 
 ## 📁 Directory Structure
 
+### **Currently Implemented:**
 ```
 examples/
 ├── README.md                    # This file
 ├── basic_usage/                 # Simple examples for beginners
-│   ├── simple_analysis.py      # Basic HAR file analysis
-│   ├── multiple_files.py       # Analyzing multiple log files
-│   └── streaming_analysis.py   # Real-time streaming analysis
-├── advanced_workflows/          # Complex analysis scenarios
-│   ├── proxy_audit.py          # Comprehensive proxy security audit
-│   ├── automation_detection.py # Browser automation detection
-│   ├── geographic_analysis.py  # Geographic consistency checking
-│   └── security_assessment.py  # Complete security assessment
-├── integrations/               # Integration examples
-│   ├── ci_cd_integration.py   # CI/CD pipeline integration
-│   ├── monitoring_system.py   # Monitoring system integration
-│   └── api_integration.py     # REST API integration
-├── custom_detectors/           # Custom detector examples
-│   ├── custom_proxy_detector.py    # Custom proxy detection logic
-│   ├── custom_browser_detector.py  # Custom browser detection
-│   └── plugin_development.py       # Plugin development example
-├── performance/                # Performance optimization examples
-│   ├── large_file_processing.py    # Handling large files efficiently
-│   ├── concurrent_analysis.py      # Parallel processing
-│   └── memory_optimization.py      # Memory-efficient analysis
-├── sample_data/               # Sample log files for testing
-│   ├── sample_session.har     # Sample HAR file
-│   ├── sample_proxy.log       # Sample mitmproxy log
-│   ├── sample_browser.log     # Sample browser automation log
-│   └── README.md              # Sample data documentation
-└── notebooks/                 # Jupyter notebook examples
-    ├── interactive_analysis.ipynb      # Interactive analysis tutorial
-    ├── visualization_examples.ipynb    # Data visualization examples
-    └── research_workflows.ipynb        # Research and analysis workflows
+│   ├── simple_analysis.py      # ✅ Basic HAR file analysis (IMPLEMENTED)
+│   └── simple_analysis_report.json # Generated report file
+├── advanced_workflows/          # Complex analysis scenarios  
+│   ├── proxy_audit.py          # ✅ Comprehensive proxy security audit (IMPLEMENTED)
+│   ├── proxy_audit_detailed_*.json    # Generated detailed reports
+│   ├── proxy_audit_report_*.html      # Generated HTML reports
+│   └── proxy_audit_summary_*.json     # Generated summary reports
+└── sample_data/                # Sample log files for testing
+    ├── sample_session.har      # ✅ Sample HAR file (IMPLEMENTED)
+    ├── sample_proxy.log        # ✅ Sample mitmproxy log (IMPLEMENTED)
+    └── README.md               # ✅ Sample data documentation (IMPLEMENTED)
+```
+
+### **Can Be Implemented (Core Functionality Available):**
+```
+examples/
+├── basic_usage/                 
+│   ├── multiple_files.py       # CAN IMPLEMENT: Multiple log file support exists
+│   └── streaming_analysis.py   # CAN IMPLEMENT: stream_analysis() method exists
+├── advanced_workflows/          
+│   ├── automation_detection.py # CAN IMPLEMENT: BrowserDetector available
+│   ├── geographic_analysis.py  # CAN IMPLEMENT: GeographicInfo in network traces
+│   └── security_assessment.py  # CAN IMPLEMENT: All detectors available
+├── custom_detectors/           
+│   ├── custom_proxy_detector.py    # CAN IMPLEMENT: IDetector interface exists
+│   ├── custom_browser_detector.py  # CAN IMPLEMENT: BaseDetector class available
+│   └── plugin_development.py       # CAN IMPLEMENT: IComponent interface exists
+├── performance/                
+│   ├── large_file_processing.py    # CAN IMPLEMENT: Streaming support exists
+│   ├── concurrent_analysis.py      # CAN IMPLEMENT: Async architecture supports this
+│   └── memory_optimization.py      # CAN IMPLEMENT: Stream processing available
+└── sample_data/               
+    └── sample_browser.log      # CAN CREATE: Browser parser exists
+```
+
+### **Requires Additional Development:**
+```
+examples/
+├── integrations/               # NEEDS DEVELOPMENT: External system integration
+│   ├── ci_cd_integration.py   # NEEDS DEVELOPMENT: CI/CD specific features
+│   ├── monitoring_system.py   # NEEDS DEVELOPMENT: Monitoring integration
+│   └── api_integration.py     # NEEDS DEVELOPMENT: REST API wrapper
+└── notebooks/                 # NEEDS DEVELOPMENT: Jupyter-specific features
+    ├── interactive_analysis.ipynb      # NEEDS DEVELOPMENT: Notebook integration
+    ├── visualization_examples.ipynb    # NEEDS DEVELOPMENT: Visualization libraries
+    └── research_workflows.ipynb        # NEEDS DEVELOPMENT: Research-specific tools
 ```
 
 ---
@@ -153,14 +171,32 @@ Optimizing for different scenarios:
 
 ## 🧪 Sample Data
 
-The `sample_data/` directory contains realistic sample files for testing:
+The `sample_data/` directory contains realistic sample files for testing and demonstrating NetStealth Analyzer functionality:
 
-- **sample_session.har**: Browser session with various requests
-- **sample_proxy.log**: Mitmproxy debug log with proxy flows
-- **sample_browser.log**: Browser automation detection scenarios
-- **sample_large.har**: Large file for performance testing
+- **sample_session.har**: Complete web session capture with multiple security vulnerabilities including:
+  - Browser automation detection (HeadlessChrome user agent)
+  - Insecure HTTP connections with sensitive data
+  - IP address leakage in headers (X-Forwarded-For, X-Real-IP)
+  - Third-party tracking requests
+  - Sensitive data in URL parameters
+  - Fingerprinting script detection
+  - Debug information leakage
 
-All sample data is anonymized and safe for testing purposes.
+- **sample_proxy.log**: Mitmproxy session log with detailed security analysis including:
+  - Proxy server startup and configuration logs
+  - Request/response logging with security annotations
+  - Real-time security issue detection
+  - Geographic and routing analysis
+  - Risk assessment calculations
+  - Connection metadata
+
+- **README.md**: Comprehensive documentation explaining the sample data, expected analysis results, and usage instructions
+
+### Expected Analysis Results
+
+When running examples with the sample data, you should expect to find several security issues demonstrating the analyzer's detection capabilities. The sample data is specifically crafted to showcase various vulnerability types and network patterns.
+
+All sample data uses fictional domains, RFC 5737 documentation IP ranges, and contains no real credentials or sensitive information. It is completely safe for testing and development purposes.
 
 ---
 

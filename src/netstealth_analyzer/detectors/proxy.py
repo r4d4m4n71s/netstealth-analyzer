@@ -247,15 +247,17 @@ class ProxyDetector(BaseDetector):
         """
         issues = []
         
+        # Get request and response data from protocol-specific data or legacy fields
+        request = self._get_request_data(trace)
+        response = self._get_response_data(trace)
+        
         # Check request headers for proxy indicators
-        if trace.request and trace.request.headers:
-            proxy_header_issues = self._check_proxy_headers(trace)
-            issues.extend(proxy_header_issues)
+        proxy_header_issues = self._check_proxy_headers(trace)
+        issues.extend(proxy_header_issues)
         
         # Check response content for proxy detection messages
-        if trace.response and trace.response.body:
-            detection_issues = self._check_proxy_detection_messages(trace)
-            issues.extend(detection_issues)
+        detection_issues = self._check_proxy_detection_messages(trace)
+        issues.extend(detection_issues)
         
         # Check for IP leak indicators
         ip_leak_issues = self._check_ip_leaks(trace)
@@ -293,7 +295,8 @@ class ProxyDetector(BaseDetector):
         total_service_requests = 0
         
         for trace in traces:
-            if self._is_service_domain(self._extract_domain(trace.request.url), context.service_domains):
+            request_url = self._get_request_url(trace)
+            if request_url and self._is_service_domain(self._extract_domain(request_url), context.service_domains):
                 total_service_requests += 1
                 if self._has_proxy_detection_indicators(trace):
                     detection_count += 1
@@ -316,7 +319,9 @@ class ProxyDetector(BaseDetector):
         """Check for proxy-revealing headers."""
         issues = []
         
-        if not trace.request or not trace.request.headers:
+        # Use the new protocol-aware method
+        request = self._get_request_data(trace)
+        if not request or not request.headers:
             return issues
         
         # Common proxy-revealing headers
@@ -331,7 +336,7 @@ class ProxyDetector(BaseDetector):
         ]
         
         proxy_headers_found = []
-        for header in trace.request.headers:
+        for header in request.headers:
             header_name = header.get('name', '').lower()
             if header_name in proxy_header_names:
                 proxy_headers_found.append(header)
@@ -345,13 +350,15 @@ class ProxyDetector(BaseDetector):
         """Check response content for proxy detection messages."""
         issues = []
         
-        if not trace.response or not trace.response.body:
+        # Use the new protocol-aware method
+        response_body = self._get_response_body(trace)
+        if not response_body:
             return issues
         
-        response_body = str(trace.response.body).lower()
+        response_body_lower = response_body.lower()
         
         for pattern in self.proxy_detection_patterns:
-            if re.search(pattern, response_body, re.IGNORECASE):
+            if re.search(pattern, response_body_lower, re.IGNORECASE):
                 issues.append(self._create_proxy_detection_issue(trace, pattern))
                 break  # Only create one issue per trace to avoid duplicates
         
@@ -362,20 +369,22 @@ class ProxyDetector(BaseDetector):
         issues = []
         
         # Check response body for IP leak messages
-        if trace.response and trace.response.body:
-            response_body = str(trace.response.body).lower()
+        response_body = self._get_response_body(trace)
+        if response_body:
+            response_body_lower = response_body.lower()
             
             for pattern in self.ip_leak_patterns:
-                if re.search(pattern, response_body, re.IGNORECASE):
+                if re.search(pattern, response_body_lower, re.IGNORECASE):
                     issues.append(self._create_ip_leak_issue(trace, pattern))
                     break
         
         # Check if request is to IP detection service
-        if trace.request and self._is_ip_detection_service(self._extract_domain(trace.request.url)):
+        request_url = self._get_request_url(trace)
+        if request_url and self._is_ip_detection_service(self._extract_domain(request_url)):
             # If response contains actual IP, it might be a leak
-            if trace.response and trace.response.body:
+            if response_body:
                 ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-                if re.search(ip_pattern, str(trace.response.body)):
+                if re.search(ip_pattern, response_body):
                     issues.append(self._create_ip_service_leak_issue(trace))
         
         return issues
@@ -384,10 +393,11 @@ class ProxyDetector(BaseDetector):
         """Check for WebRTC-related IP leaks."""
         issues = []
         
-        if not trace.request:
+        request_url = self._get_request_url(trace)
+        if not request_url:
             return issues
         
-        url = trace.request.url.lower()
+        url = request_url.lower()
         
         # Check for WebRTC-related requests
         webrtc_indicators = ['stun:', 'turn:', 'ice-candidate', 'webrtc']
@@ -396,9 +406,10 @@ class ProxyDetector(BaseDetector):
             issues.append(self._create_webrtc_leak_issue(trace))
         
         # Check response body for WebRTC leak indicators
-        if trace.response and trace.response.body:
-            response_body = str(trace.response.body).lower()
-            if re.search(r'webrtc.*leak|stun.*server|ice.*candidate', response_body):
+        response_body = self._get_response_body(trace)
+        if response_body:
+            response_body_lower = response_body.lower()
+            if re.search(r'webrtc.*leak|stun.*server|ice.*candidate', response_body_lower):
                 issues.append(self._create_webrtc_leak_issue(trace))
         
         return issues
@@ -407,10 +418,11 @@ class ProxyDetector(BaseDetector):
         """Check for datacenter IP detection."""
         issues = []
         
-        if not trace.response or not trace.response.body:
+        response_body = self._get_response_body(trace)
+        if not response_body:
             return issues
         
-        response_body = str(trace.response.body).lower()
+        response_body_lower = response_body.lower()
         
         datacenter_patterns = [
             r'datacenter.*ip',
@@ -421,7 +433,7 @@ class ProxyDetector(BaseDetector):
         ]
         
         for pattern in datacenter_patterns:
-            if re.search(pattern, response_body, re.IGNORECASE):
+            if re.search(pattern, response_body_lower, re.IGNORECASE):
                 issues.append(self._create_datacenter_detection_issue(trace, pattern))
                 break
         
@@ -429,10 +441,11 @@ class ProxyDetector(BaseDetector):
     
     def _has_proxy_detection_indicators(self, trace: NetworkTrace) -> bool:
         """Check if trace has proxy detection indicators."""
-        if trace.response and trace.response.body:
-            response_body = str(trace.response.body).lower()
+        response_body = self._get_response_body(trace)
+        if response_body:
+            response_body_lower = response_body.lower()
             return any(
-                re.search(pattern, response_body, re.IGNORECASE) 
+                re.search(pattern, response_body_lower, re.IGNORECASE) 
                 for pattern in self.proxy_detection_patterns
             )
         return False
@@ -449,13 +462,16 @@ class ProxyDetector(BaseDetector):
         detected_ips = []
         
         for trace in traces:
-            if (trace.request and 
-                self._is_ip_detection_service(self._extract_domain(trace.request.url)) and
-                trace.response and trace.response.body):
+            request_url = self._get_request_url(trace)
+            response_body = self._get_response_body(trace)
+            
+            if (request_url and 
+                self._is_ip_detection_service(self._extract_domain(request_url)) and
+                response_body):
                 
                 # Extract IP addresses from response
                 ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-                ips = re.findall(ip_pattern, str(trace.response.body))
+                ips = re.findall(ip_pattern, response_body)
                 detected_ips.extend(ips)
         
         # Check for multiple different IPs (might indicate IP rotation or leaks)
@@ -563,11 +579,14 @@ class ProxyDetector(BaseDetector):
     
     def _create_ip_service_leak_issue(self, trace: NetworkTrace) -> Issue:
         """Create issue for IP detection service leak."""
+        request_url = self._get_request_url(trace)
+        service_domain = self._extract_domain(request_url) if request_url else "unknown"
+        
         evidence = [
             self._create_evidence(
                 "ip_service_response",
                 "IP detection service returned IP address",
-                f"Service: {self._extract_domain(trace.request.url)}",
+                f"Service: {service_domain}",
                 metadata={"trace_id": trace.trace_id}
             )
         ]
@@ -582,7 +601,7 @@ class ProxyDetector(BaseDetector):
             metadata={
                 "rule_id": "ip_leak_detected",
                 "trace_id": trace.trace_id,
-                "service": self._extract_domain(trace.request.url)
+                "service": service_domain
             },
             remediation_suggestions=[
                 "Block IP detection services",
@@ -593,11 +612,13 @@ class ProxyDetector(BaseDetector):
     
     def _create_webrtc_leak_issue(self, trace: NetworkTrace) -> Issue:
         """Create issue for WebRTC leak."""
+        request_url = self._get_request_url(trace)
+        
         evidence = [
             self._create_evidence(
                 "webrtc_indicator",
                 "WebRTC leak indicator detected",
-                f"URL: {trace.request.url}",
+                f"URL: {request_url or 'unknown'}",
                 metadata={"trace_id": trace.trace_id}
             )
         ]

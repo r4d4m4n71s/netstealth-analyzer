@@ -87,6 +87,14 @@ class IssueCategory(str, Enum):
     BROWSER_CONFIG = "browser_config"
     NETWORK_ANOMALY = "network_anomaly"
     
+    # High-risk session validation categories
+    BROWSER_AUTOMATION = "browser_automation"
+    IP_LEAKAGE = "ip_leakage"
+    DATA_EXPOSURE = "data_exposure"
+    FINGERPRINTING = "fingerprinting"
+    TRACKING = "tracking"
+    DEBUG_LEAKAGE = "debug_leakage"
+    
     # Extended categories
     AUTHENTICATION = "authentication"
     AUTHORIZATION = "authorization"
@@ -285,6 +293,8 @@ class NetworkProtocol(str, Enum):
     TCP = "tcp"
     UDP = "udp"
     QUIC = "quic"
+    GRPC = "grpc"
+    UNKNOWN = "unknown"
     
     @property
     def is_encrypted(self) -> bool:

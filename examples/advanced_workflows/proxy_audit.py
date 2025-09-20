@@ -133,24 +133,7 @@ class ProxySecurityAuditor:
         
         print("\n🔧 Configuring analyzer for proxy security audit...")
         
-        # Create analyzer with focus on proxy and network detection
-        analyzer = (NetStealthAnalyzer.create()
-                    .with_logs(log_files)
-                    .for_service(target_service)
-                    .with_detectors(["proxy", "network", "browser"])  # Focus on proxy-related detectors
-                    .enable_fingerprint_analysis()  # Enable detailed fingerprinting
-                    .timeout(600)  # 10 minute timeout for thorough analysis
-                    .build())
-        
-        # Register event handlers for progress tracking
-        await self._register_event_handlers(analyzer)
-        
-        print("✅ Analyzer configured for comprehensive proxy audit")
-        return analyzer
-    
-    async def _register_event_handlers(self, analyzer: NetStealthAnalyzer):
-        """Register event handlers for detailed progress tracking."""
-        
+        # Define event handlers
         async def on_analysis_started(event, data):
             print(f"🚀 Analysis started - {data.get('components_count', 0)} components loaded")
             self.progress_data['start_time'] = datetime.now()
@@ -180,12 +163,23 @@ class ProxySecurityAuditor:
             print(f"🎉 Analysis completed: {issues_count} issues found ({duration}ms)")
             self.progress_data['end_time'] = datetime.now()
         
-        # Register all handlers
-        analyzer.on_event(AnalysisEvent.ANALYSIS_STARTED, on_analysis_started)
-        analyzer.on_event(AnalysisEvent.PROGRESS_UPDATE, on_progress_update)
-        analyzer.on_event(AnalysisEvent.ISSUE_FOUND, on_issue_found)
-        analyzer.on_event(AnalysisEvent.DETECTOR_COMPLETED, on_detector_completed)
-        analyzer.on_event(AnalysisEvent.ANALYSIS_COMPLETED, on_analysis_completed)
+        # Create analyzer with focus on proxy and network detection and register event handlers
+        analyzer = (NetStealthAnalyzer.create()
+                    .with_logs(*log_files)  # Unpack the list for the fluent API
+                    .for_service(target_service)
+                    .with_detectors("proxy", "network", "browser")  # Focus on proxy-related detectors
+                    .enable_fingerprint_analysis()  # Enable detailed fingerprinting
+                    .timeout(600)  # 10 minute timeout for thorough analysis
+                    .on(AnalysisEvent.ANALYSIS_STARTED, on_analysis_started)
+                    .on(AnalysisEvent.PROGRESS_UPDATE, on_progress_update)
+                    .on(AnalysisEvent.ISSUE_FOUND, on_issue_found)
+                    .on(AnalysisEvent.DETECTOR_COMPLETED, on_detector_completed)
+                    .on(AnalysisEvent.ANALYSIS_COMPLETED, on_analysis_completed)
+                    .build())
+        
+        print("✅ Analyzer configured for comprehensive proxy audit")
+        return analyzer
+    
     
     async def _run_analysis_with_tracking(self, analyzer: NetStealthAnalyzer):
         """Run analysis with comprehensive error handling and tracking."""
@@ -476,9 +470,11 @@ class ProxySecurityAuditor:
                 json.dump(final_report, f, indent=2, default=str)
             print(f"✅ Detailed JSON report: {json_file}")
             
-            # Save HTML report using analyzer
+            # Save HTML report using Report class
             html_file = f"proxy_audit_report_{timestamp}.html"
-            await analyzer.report(result, format="html", output=html_file)
+            from netstealth_analyzer.reporting.reporter import Report
+            report_obj = Report(analysis_result=result)
+            report_obj.save_html(html_file)
             print(f"✅ HTML report: {html_file}")
             
             # Save executive summary

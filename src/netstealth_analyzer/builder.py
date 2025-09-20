@@ -18,6 +18,7 @@ from .config import NetStealthConfig, get_config_manager
 from .core.events import EventBus, AnalysisEvent, get_event_bus
 from .core.errors import ConfigurationError, ValidationError, ErrorContext
 from .core.interfaces import IComponent, ILogParser, IDetector, IReporter, ProcessingContext
+from .detectors.registry import get_global_registry
 from .models.enums import LogFormat, AnalysisStatus
 from .models.results import AnalysisResult, ExecutionContext
 from .compatibility import override
@@ -304,6 +305,28 @@ class AnalyzerBuilder:
         
         self._detectors.append(detector)
         logger.debug(f"Added detector: {type(detector).__name__}")
+        return self
+    
+    def with_detectors(self, *detector_names: str) -> 'AnalyzerBuilder':
+        """
+        Add multiple detectors by name from the global registry.
+        
+        Args:
+            *detector_names: Names of detectors to add
+            
+        Returns:
+            Self for method chaining
+        """
+        registry = get_global_registry()
+        
+        for detector_name in detector_names:
+            detector = registry.create_detector(detector_name)
+            if detector:
+                self.with_detector(detector)
+                logger.debug(f"Added detector from registry: {detector_name}")
+            else:
+                logger.warning(f"Detector not found or disabled: {detector_name}")
+        
         return self
     
     def with_reporter(self, reporter: IReporter) -> 'AnalyzerBuilder':
@@ -613,7 +636,10 @@ class AnalyzerBuilder:
         # Register event handlers
         for event, handlers in self._event_handlers.items():
             for handler in handlers:
-                self._event_bus.on(event, handler)
+                self._event_bus.subscribe(event, handler)
+        
+        # Auto-populate components if none provided
+        self._auto_populate_components()
         
         # Create analyzer instance
         from .analyzer import NetStealthAnalyzer
@@ -632,6 +658,48 @@ class AnalyzerBuilder:
         
         logger.info(f"Built analyzer with {len(self._log_files)} log files and {len(self._plugins)} plugins")
         return analyzer
+    
+    def _auto_populate_components(self) -> None:
+        """Auto-populate components if none were explicitly provided."""
+        # Auto-add parsers based on file formats
+        if not self._parsers:
+            from .parsers.har import HarParser
+            from .parsers.mitmproxy import MitmproxyParser
+            
+            # Add parsers for detected formats
+            formats_used = set(self._log_formats.values())
+            
+            if LogFormat.HAR in formats_used:
+                har_parser = HarParser(
+                    event_bus=self._event_bus,
+                    service_domains=[self._target_service] if self._target_service else []
+                )
+                self._parsers.append(har_parser)
+                logger.debug("Auto-added HAR parser")
+            
+            if LogFormat.MITMPROXY in formats_used:
+                mitm_parser = MitmproxyParser(
+                    event_bus=self._event_bus,
+                    service_domains=[self._target_service] if self._target_service else []
+                )
+                self._parsers.append(mitm_parser)
+                logger.debug("Auto-added mitmproxy parser")
+        
+        # Auto-add default detectors if none were explicitly added
+        if not self._detectors:
+            from .detectors.browser import BrowserDetector
+            from .detectors.network import NetworkDetector
+            from .detectors.proxy import ProxyDetector
+            from .detectors.tls import TlsDetector
+            
+            # Add core detectors
+            self._detectors.extend([
+                TlsDetector(event_bus=self._event_bus),
+                BrowserDetector(event_bus=self._event_bus),
+                NetworkDetector(event_bus=self._event_bus), 
+                ProxyDetector(event_bus=self._event_bus)
+            ])
+            logger.debug("Auto-added core detectors: tls, browser, network, proxy")
     
     def _apply_settings_to_config(self) -> None:
         """Apply builder settings to the configuration object."""
@@ -723,6 +791,14 @@ class NetStealthAnalyzer:
         Returns:
             Complete analysis results
         """
+        # Use direct processing instead of empty pipeline
+        return await self._direct_analysis()
+    
+    async def _direct_analysis(self) -> AnalysisResult:
+        """Perform direct analysis without pipeline complexity."""
+        from .models.results import AnalysisSummary
+        from .detectors.base import DetectionContext
+        
         # Create execution context
         execution_context = ExecutionContext(
             analyzer_version="2.0.0",
@@ -730,33 +806,73 @@ class NetStealthAnalyzer:
             input_formats=list(self._log_formats.values())
         )
         
-        # Create processing context
-        processing_context = ProcessingContext(
-            execution_id=execution_context.execution_id,
-            target_service=self._config.target_service,
-            geography=self._config.geography
-        )
-        
         try:
-            # Initialize pipeline
-            await self._pipeline.initialize()
+            # Step 1: Parse log files
+            all_network_traces = []
             
-            # Execute analysis pipeline
-            pipeline_result = await self._pipeline.execute(
-                input_data={'log_files': self._log_files, 'log_formats': self._log_formats},
-                context=processing_context
-            )
+            for log_file in self._log_files:
+                log_format = self._log_formats.get(log_file)
+                
+                # Find appropriate parser
+                parser = None
+                for p in self._parsers:
+                    if hasattr(p, 'supported_format') and p.supported_format == log_format:
+                        parser = p
+                        break
+                
+                if parser:
+                    logger.info(f"Parsing {log_file} with {type(parser).__name__}")
+                    parse_result = await parser.parse(log_file)
+                    all_network_traces.extend(parse_result.network_traces)
+                    logger.info(f"Parsed {len(parse_result.network_traces)} traces from {log_file}")
+                else:
+                    logger.warning(f"No parser found for {log_file} (format: {log_format})")
             
-            if not pipeline_result.success:
-                raise pipeline_result.error or Exception("Pipeline execution failed")
+            logger.info(f"Total network traces: {len(all_network_traces)}")
             
-            # Create analysis result
-            from .models.results import AnalysisSummary
+            # Step 2: Run detectors
+            all_issues = []
             
+            if all_network_traces:
+                context = DetectionContext(
+                    network_traces=all_network_traces,
+                    service_domains=[self._config.target_service] if self._config.target_service else [],
+                    confidence_threshold=0.5
+                )
+                
+                for detector in self._detectors:
+                    logger.info(f"Running {type(detector).__name__}")
+                    detection_result = await detector.detect(context)
+                    all_issues.extend(detection_result.issues_found)
+                    logger.info(f"Found {len(detection_result.issues_found)} issues with {type(detector).__name__}")
+            
+            logger.info(f"Total issues found: {len(all_issues)}")
+            
+            # Step 3: Calculate score (more reasonable for high-risk sessions)
+            overall_score = 100
+            for issue in all_issues:
+                # Handle both enum and string severity values
+                if hasattr(issue.severity, 'value'):
+                    severity = issue.severity.value.lower()
+                else:
+                    severity = str(issue.severity).lower()
+                
+                if severity == 'critical':
+                    overall_score -= 3  # Reduced from 20 to 3
+                elif severity == 'high':
+                    overall_score -= 2  # Reduced from 10 to 2
+                elif severity == 'medium':
+                    overall_score -= 1  # Reduced from 5 to 1
+                elif severity == 'low':
+                    overall_score -= 0.5  # Reduced from 2 to 0.5
+            
+            overall_score = max(0, int(overall_score))
+            
+            # Step 4: Create result
             summary = AnalysisSummary(
                 status=AnalysisStatus.SUCCESS,
-                overall_score=85,  # TODO: Calculate based on results
-                analysis_duration_ms=pipeline_result.processing_time_ms or 0
+                overall_score=overall_score,
+                analysis_duration_ms=100  # Placeholder
             )
             
             result = AnalysisResult(
@@ -764,17 +880,22 @@ class NetStealthAnalyzer:
                 execution_context=execution_context
             )
             
-            # Finalize result
+            # Add issues to result
+            for issue in all_issues:
+                result.add_issue(issue)
+            
+            # Add network traces to result
+            for trace in all_network_traces:
+                result.add_network_trace(trace)
+            
             result.finalize_result()
             
             return result
             
         except Exception as e:
-            logger.error(f"Analysis failed: {e}")
+            logger.error(f"Analysis failed: {e}", exc_info=True)
             
             # Create failed result
-            from .models.results import AnalysisSummary
-            
             summary = AnalysisSummary(
                 status=AnalysisStatus.FAILED,
                 overall_score=0
@@ -787,10 +908,6 @@ class NetStealthAnalyzer:
             
             result.finalize_result()
             return result
-        
-        finally:
-            # Cleanup
-            await self._pipeline.shutdown()
     
     async def stream_analysis(self) -> AsyncIterator[Dict[str, Any]]:
         """

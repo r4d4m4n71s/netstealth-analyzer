@@ -102,7 +102,10 @@ async def simple_analysis_example():
         
         # Generate simple report
         print("📄 Generating JSON report...")
-        await analyzer.report(result, format="json", output="simple_analysis_report.json")
+        from netstealth_analyzer.reporting.reporter import Report
+        
+        report = Report(analysis_result=result)
+        report.save_json("simple_analysis_report.json")
         print("✅ Report saved to: simple_analysis_report.json")
         
         # Show network trace summary

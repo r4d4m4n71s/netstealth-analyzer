@@ -353,34 +353,37 @@ class DetectorRegistry:
     def _register_builtin_detectors(self) -> None:
         """Register built-in detectors."""
         # Import and register built-in detectors
-        try:
-            from .tls import TlsDetector
-            self.register_detector(TlsDetector, priority=10)
-        except ImportError:
-            pass  # TLS detector not available yet
+        from .tls import TlsDetector
+        from .proxy import ProxyDetector
+        from .browser import BrowserDetector
+        from .network import NetworkDetector
         
-        try:
-            from .proxy import ProxyDetector
-            self.register_detector(ProxyDetector, priority=20)
-        except ImportError:
-            pass  # Proxy detector not available yet
-        
-        try:
-            from .browser import BrowserDetector
-            self.register_detector(BrowserDetector, priority=30)
-        except ImportError:
-            pass  # Browser detector not available yet
-        
-        try:
-            from .network import NetworkDetector
-            self.register_detector(NetworkDetector, priority=40)
-        except ImportError:
-            pass  # Network detector not available yet
+        self.register_detector(TlsDetector, priority=10)
+        self.register_detector(ProxyDetector, priority=20)
+        self.register_detector(BrowserDetector, priority=30)
+        self.register_detector(NetworkDetector, priority=40)
     
     def _emit_event(self, event_type: str, data: Any = None) -> None:
         """Emit event if event bus is available."""
         if self.event_bus:
-            self.event_bus.emit(event_type, data)
+            # Create a task for the async emit to avoid unawaited coroutine warning
+            import asyncio
+            try:
+                # Try to get the running loop (modern approach)
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we're in an async context, create a task
+                    asyncio.create_task(self.event_bus.emit(event_type, data))
+                except RuntimeError:
+                    # No running loop, try to create a new one
+                    try:
+                        asyncio.run(self.event_bus.emit(event_type, data))
+                    except RuntimeError:
+                        # Can't create event loop, skip event emission
+                        pass
+            except Exception:
+                # Any other error, skip event emission
+                pass
 
 
 # Global registry instance

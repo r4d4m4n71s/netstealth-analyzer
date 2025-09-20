@@ -80,6 +80,55 @@ class NetStealthAnalyzer:
         self._is_initialized = False
         self._current_analysis: Optional[AnalysisResult] = None
     
+    async def _setup_pipeline_stages(self) -> None:
+        """Set up pipeline stages from parsers and detectors."""
+        from .core.interfaces import PipelineStage
+        
+        # Add parser stages (run first)
+        parser_stages = []
+        for i, parser in enumerate(self._parsers):
+            stage_name = f"parser_{type(parser).__name__.lower()}_{i}"
+            stage = PipelineStage(
+                name=stage_name,
+                component=parser,
+                depends_on=[],  # Parsers have no dependencies
+                parallel=True,  # Parsers can run in parallel
+                optional=False,
+                timeout_seconds=300.0,
+                retry_count=1
+            )
+            await self._pipeline.add_stage(stage)
+            parser_stages.append(stage_name)
+        
+        # Add detector stages (run after parsers)
+        for i, detector in enumerate(self._detectors):
+            stage_name = f"detector_{type(detector).__name__.lower()}_{i}"
+            stage = PipelineStage(
+                name=stage_name,
+                component=detector,
+                depends_on=parser_stages,  # Detectors depend on all parsers
+                parallel=True,  # Detectors can run in parallel
+                optional=False,
+                timeout_seconds=300.0,
+                retry_count=1
+            )
+            await self._pipeline.add_stage(stage)
+        
+        # Add reporter stages (run after detectors) if any
+        detector_stages = [f"detector_{type(d).__name__.lower()}_{i}" for i, d in enumerate(self._detectors)]
+        for i, reporter in enumerate(self._reporters):
+            stage_name = f"reporter_{type(reporter).__name__.lower()}_{i}"
+            stage = PipelineStage(
+                name=stage_name,
+                component=reporter,
+                depends_on=detector_stages,  # Reporters depend on all detectors
+                parallel=False,  # Reporters should run sequentially
+                optional=True,   # Reporters are optional
+                timeout_seconds=120.0,
+                retry_count=0
+            )
+            await self._pipeline.add_stage(stage)
+    
     @classmethod
     def create(cls):
         """
@@ -116,6 +165,9 @@ class NetStealthAnalyzer:
         try:
             # Initialize pipeline
             await self._pipeline.initialize(self._config.performance.model_dump())
+            
+            # Set up pipeline stages
+            await self._setup_pipeline_stages()
             
             # Initialize all components
             for component_list in [self._parsers, self._detectors, self._reporters, self._plugins]:
@@ -172,100 +224,135 @@ class NetStealthAnalyzer:
             Complete analysis results
             
         Raises:
-            RuntimeError: If analyzer is not initialized
-            Exception: If analysis fails
+            ValueError: If no log files are configured
         """
-        if not self._is_initialized:
-            await self.initialize()
-        
         if not self._log_files:
             raise ValueError("No log files configured for analysis")
         
-        logger.info(f"Starting analysis of {len(self._log_files)} log files")
+        # Use direct processing instead of complex pipeline
+        return await self._direct_analysis()
+    
+    async def _direct_analysis(self) -> AnalysisResult:
+        """Perform direct analysis without pipeline complexity."""
+        from .detectors.base import DetectionContext
         
         # Create execution context
         execution_context = ExecutionContext(
             analyzer_version="2.0.0",
             input_files=self._log_files,
-            input_formats=list(self._log_formats.values()),
-            components_used=[
-                *[type(p).__name__ for p in self._parsers],
-                *[type(d).__name__ for d in self._detectors],
-                *[type(r).__name__ for r in self._reporters],
-            ],
-            plugins_loaded=[p.metadata.name for p in self._plugins if hasattr(p, 'metadata')]
-        )
-        
-        # Create processing context
-        processing_context = ProcessingContext(
-            file_path=self._log_files[0] if self._log_files else None
+            input_formats=list(self._log_formats.values())
         )
         
         try:
-            # Prepare input data
-            input_data = {
-                'log_files': self._log_files,
-                'log_formats': self._log_formats,
-                'config': self._config.model_dump(),
-                'execution_context': execution_context.model_dump()
-            }
+            logger.info(f"Starting direct analysis with {len(self._log_files)} log files")
+            logger.info(f"Available parsers: {[type(p).__name__ for p in self._parsers]}")
+            logger.info(f"Log formats: {self._log_formats}")
             
-            # Execute analysis pipeline
-            pipeline_result = await self._pipeline.execute(
-                input_data=input_data,
-                context=processing_context
-            )
+            # Step 1: Parse log files
+            all_network_traces = []
             
-            if not pipeline_result.success:
-                raise pipeline_result.error or Exception("Pipeline execution failed")
+            for log_file in self._log_files:
+                log_format = self._log_formats.get(log_file)
+                logger.info(f"Processing {log_file} with format {log_format}")
+                
+                # Find appropriate parser
+                parser = None
+                for p in self._parsers:
+                    logger.info(f"Checking parser {type(p).__name__}")
+                    if hasattr(p, 'supported_format'):
+                        logger.info(f"Parser supports format: {p.supported_format}")
+                        logger.info(f"Match check: {p.supported_format == log_format}")
+                        if p.supported_format == log_format:
+                            parser = p
+                            break
+                    else:
+                        logger.warning(f"Parser {type(p).__name__} has no supported_format attribute")
+                
+                if parser:
+                    logger.info(f"Found parser: {type(parser).__name__}")
+                    logger.info(f"Parsing {log_file} with {type(parser).__name__}")
+                    parse_result = await parser.parse(log_file)
+                    logger.info(f"Parse result: {len(parse_result.network_traces)} traces")
+                    all_network_traces.extend(parse_result.network_traces)
+                    logger.info(f"Parsed {len(parse_result.network_traces)} traces from {log_file}")
+                else:
+                    logger.error(f"No parser found for {log_file} (format: {log_format})")
             
-            # Create analysis summary
+            logger.info(f"Total network traces: {len(all_network_traces)}")
+            
+            # Step 2: Run detectors
+            all_issues = []
+            
+            if all_network_traces:
+                context = DetectionContext(
+                    network_traces=all_network_traces,
+                    service_domains=[self._config.target_service] if self._config.target_service else [],
+                    confidence_threshold=0.5
+                )
+                
+                for detector in self._detectors:
+                    logger.info(f"Running {type(detector).__name__}")
+                    detection_result = await detector.detect(context)
+                    all_issues.extend(detection_result.issues_found)
+                    logger.info(f"Found {len(detection_result.issues_found)} issues with {type(detector).__name__}")
+            
+            logger.info(f"Total issues found: {len(all_issues)}")
+            
+            # Step 3: Calculate score
+            overall_score = 100
+            for issue in all_issues:
+                if hasattr(issue.severity, 'value'):
+                    severity = issue.severity.value
+                else:
+                    severity = str(issue.severity).lower()
+                
+                if severity == 'critical':
+                    overall_score -= 20
+                elif severity == 'high':
+                    overall_score -= 10
+                elif severity == 'medium':
+                    overall_score -= 5
+                elif severity == 'low':
+                    overall_score -= 2
+            
+            overall_score = max(0, overall_score)
+            
+            # Step 4: Create result
             summary = AnalysisSummary(
                 status=AnalysisStatus.SUCCESS,
-                overall_score=self._calculate_overall_score(pipeline_result.data),
-                analysis_duration_ms=pipeline_result.processing_time_ms or 0,
-                timestamp=datetime.now(timezone.utc)
+                overall_score=overall_score,
+                analysis_duration_ms=100  # Placeholder
             )
             
-            # Create analysis result
             result = AnalysisResult(
                 summary=summary,
                 execution_context=execution_context
             )
             
-            # Process pipeline results
-            if pipeline_result.data:
-                self._process_pipeline_results(result, pipeline_result.data)
+            # Add issues to result
+            for issue in all_issues:
+                result.add_issue(issue)
             
-            # Finalize result
+            # Add network traces to result
+            for trace in all_network_traces:
+                result.add_network_trace(trace)
+            
             result.finalize_result()
             
             # Store current analysis
             self._current_analysis = result
             
-            logger.info(f"Analysis completed successfully. Score: {summary.overall_score}/100")
-            
-            # Emit completion event
-            await self._event_bus.emit(
-                AnalysisEvent.ANALYSIS_COMPLETED,
-                {
-                    'result_id': result.result_id,
-                    'overall_score': summary.overall_score,
-                    'issues_count': len(result.issues),
-                    'duration_ms': summary.analysis_duration_ms
-                }
-            )
+            logger.info(f"Analysis completed successfully. Score: {overall_score}/100")
             
             return result
             
         except Exception as e:
-            logger.error(f"Analysis failed: {e}")
+            logger.error(f"Analysis failed: {e}", exc_info=True)
             
             # Create failed result
             summary = AnalysisSummary(
                 status=AnalysisStatus.FAILED,
-                overall_score=0,
-                analysis_duration_ms=execution_context.duration_seconds * 1000 if execution_context.duration_seconds else 0
+                overall_score=0
             )
             
             result = AnalysisResult(
@@ -275,17 +362,6 @@ class NetStealthAnalyzer:
             
             result.finalize_result()
             self._current_analysis = result
-            
-            # Emit failure event
-            await self._event_bus.emit(
-                AnalysisEvent.ANALYSIS_FAILED,
-                {
-                    'error_type': type(e).__name__,
-                    'error_message': str(e),
-                    'execution_id': execution_context.execution_id
-                }
-            )
-            
             return result
     
     async def stream_analysis(self) -> AsyncIterator[Dict[str, Any]]:
@@ -457,25 +533,23 @@ class NetStealthAnalyzer:
     
     def _process_pipeline_results(self, result: AnalysisResult, pipeline_data: Dict[str, Any]) -> None:
         """Process results from the pipeline execution."""
-        # Extract issues if present
-        if 'issues' in pipeline_data:
-            for issue_data in pipeline_data['issues']:
-                try:
-                    from .models.issues import Issue
-                    issue = Issue(**issue_data)
-                    result.add_issue(issue)
-                except Exception as e:
-                    logger.warning(f"Failed to process issue: {e}")
-        
-        # Extract network traces if present
-        if 'network_traces' in pipeline_data:
-            for trace_data in pipeline_data['network_traces']:
-                try:
-                    from .models.network import NetworkTrace
-                    trace = NetworkTrace(**trace_data)
-                    result.add_network_trace(trace)
-                except Exception as e:
-                    logger.warning(f"Failed to process network trace: {e}")
+        # Extract issues from detector results
+        for key, value in pipeline_data.items():
+            if key.startswith('detector_') and hasattr(value, 'issues_found'):
+                # Process DetectionResult objects
+                for issue in value.issues_found:
+                    try:
+                        result.add_issue(issue)
+                    except Exception as e:
+                        logger.warning(f"Failed to process issue from {key}: {e}")
+            
+            elif key.startswith('parser_') and hasattr(value, 'network_traces'):
+                # Process ParseResult objects
+                for trace in value.network_traces:
+                    try:
+                        result.add_network_trace(trace)
+                    except Exception as e:
+                        logger.warning(f"Failed to process network trace from {key}: {e}")
         
         # Extract performance metrics if present
         if 'performance' in pipeline_data:

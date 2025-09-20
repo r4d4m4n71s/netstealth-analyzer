@@ -769,24 +769,24 @@ class TestAnalysisSummary:
         summary = AnalysisSummary(
             status=AnalysisStatus.SUCCESS,
             overall_score=100,  # Will be recalculated
-            critical_issues_count=1,  # -20 points
-            high_issues_count=2,      # -20 points
-            medium_issues_count=3,    # -15 points
-            low_issues_count=5,       # -10 points
-            info_issues_count=2       # -2 points
+            critical_issues_count=1,  # -3 points
+            high_issues_count=2,      # -4 points
+            medium_issues_count=3,    # -3 points
+            low_issues_count=5,       # -2.5 points
+            info_issues_count=2       # -0.2 points
         )
         
         # Manually trigger score calculation
         summary._calculate_overall_score()
         
-        # Expected: 100 - 20 - 20 - 15 - 10 - 2 = 33
-        assert summary.overall_score == 33
+        # Expected: 100 - 3 - 4 - 3 - 2.5 - 0.2 = 87.3 -> 87 (int)
+        assert summary.overall_score == 87
         
         # Test with success indicators
         summary = AnalysisSummary(
             status=AnalysisStatus.SUCCESS,
             overall_score=100,
-            critical_issues_count=1,  # -20 points
+            critical_issues_count=1,  # -3 points
             proxy_chain_functional=True,  # +5 points
             oauth_success=True,           # +5 points
             tls_security_adequate=True    # +5 points
@@ -794,8 +794,8 @@ class TestAnalysisSummary:
         
         summary._calculate_overall_score()
         
-        # Expected: 100 - 20 + 15 = 95
-        assert summary.overall_score == 95
+        # Expected: 100 - 3 + 15 = 112 -> 100 (capped at 100)
+        assert summary.overall_score == 100
     
     def test_get_severity_distribution(self):
         """Test severity distribution calculation."""
@@ -880,7 +880,7 @@ class TestAnalysisResult:
             trace_id="trace-123",
             source_ip="192.168.1.1",
             destination_ip="8.8.8.8",
-            protocol="TCP",
+            protocol="tcp",
             port=443
         )
         
@@ -951,7 +951,7 @@ class TestAnalysisResult:
             trace_id="trace-123",
             source_ip="192.168.1.1",
             destination_ip="8.8.8.8",
-            protocol="TCP",
+            protocol="tcp",
             port=443
         )
         
@@ -1192,7 +1192,7 @@ class TestAnalysisResult:
             trace_id="trace-1",
             source_ip="192.168.1.1",
             destination_ip="8.8.8.8",
-            protocol="TCP",
+            protocol="tcp",
             port=443,
             total_hops=3,
             proxy_chain_detected=True
@@ -1202,7 +1202,7 @@ class TestAnalysisResult:
             trace_id="trace-2",
             source_ip="192.168.1.2",
             destination_ip="1.1.1.1",
-            protocol="UDP",
+            protocol="udp",
             port=53,
             total_hops=2,
             proxy_chain_detected=False
@@ -1304,7 +1304,7 @@ class TestAnalysisResult:
             trace_id="trace-123",
             source_ip="192.168.1.1",
             destination_ip="8.8.8.8",
-            protocol="TCP",
+            protocol="tcp",
             port=443
         )
         result.add_network_trace(trace)
@@ -1436,7 +1436,7 @@ class TestResultsIntegration:
             trace_id="trace-main",
             source_ip="192.168.1.100",
             destination_ip="203.0.113.1",
-            protocol="HTTPS",
+            protocol="https",
             port=443,
             total_hops=4,
             proxy_chain_detected=True

@@ -10,17 +10,187 @@ Python: 3.13+
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Literal
 from ipaddress import IPv4Address, IPv6Address, AddressValueError
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator, computed_field
+from pydantic import BaseModel, Field, field_validator, computed_field, Discriminator, ConfigDict
 
 from .enums import (
     RiskLevel, NetworkProtocol, TLSVersion, ProxyType, 
     GeographicRegion, DetectionConfidence
 )
 from ..compatibility import override
+
+
+# ============================================================================
+# EXTENSIBLE PROTOCOL DATA ARCHITECTURE
+# ============================================================================
+
+class ProtocolData(BaseModel):
+    """
+    Base class for protocol-specific data.
+    
+    This provides the foundation for extensible protocol support,
+    allowing new protocols to be added without modifying core code.
+    """
+    protocol_type: str = Field(..., description="Protocol type identifier")
+    
+    model_config = ConfigDict(extra="forbid")
+
+
+class HttpData(ProtocolData):
+    """HTTP protocol-specific data container."""
+    
+    protocol_type: Literal["http"] = "http"
+    
+    # HTTP request/response data
+    request: Optional['HttpRequest'] = Field(None, description="HTTP request information")
+    response: Optional['HttpResponse'] = Field(None, description="HTTP response information")
+    timing: Optional['TimingInfo'] = Field(None, description="HTTP timing information")
+    
+    # HTTP-specific metadata
+    is_secure: bool = Field(False, description="Whether connection uses HTTPS")
+    redirects: List[str] = Field(default_factory=list, description="Redirect chain URLs")
+    cookies: List[Dict[str, str]] = Field(default_factory=list, description="HTTP cookies")
+    
+    @computed_field
+    @property
+    def has_request_data(self) -> bool:
+        """Check if HTTP request data is available."""
+        return self.request is not None
+    
+    @computed_field
+    @property
+    def has_response_data(self) -> bool:
+        """Check if HTTP response data is available."""
+        return self.response is not None
+    
+    @computed_field
+    @property
+    def is_success(self) -> bool:
+        """Check if HTTP response indicates success."""
+        return self.response.is_success if self.response else False
+
+
+class WebSocketData(ProtocolData):
+    """WebSocket protocol-specific data container."""
+    
+    protocol_type: Literal["websocket"] = "websocket"
+    
+    # WebSocket handshake
+    handshake_request: Optional[Dict[str, Any]] = Field(None, description="WebSocket handshake request")
+    handshake_response: Optional[Dict[str, Any]] = Field(None, description="WebSocket handshake response")
+    
+    # WebSocket frames
+    frames_sent: List[Dict[str, Any]] = Field(default_factory=list, description="Frames sent by client")
+    frames_received: List[Dict[str, Any]] = Field(default_factory=list, description="Frames received from server")
+    
+    # Connection state
+    connection_state: str = Field("unknown", description="WebSocket connection state")
+    close_code: Optional[int] = Field(None, description="WebSocket close code")
+    close_reason: Optional[str] = Field(None, description="WebSocket close reason")
+    
+    # WebSocket-specific metadata
+    subprotocols: List[str] = Field(default_factory=list, description="Negotiated subprotocols")
+    extensions: List[str] = Field(default_factory=list, description="WebSocket extensions")
+    
+    @computed_field
+    @property
+    def total_frames(self) -> int:
+        """Get total number of frames exchanged."""
+        return len(self.frames_sent) + len(self.frames_received)
+    
+    @computed_field
+    @property
+    def is_connected(self) -> bool:
+        """Check if WebSocket connection is active."""
+        return self.connection_state.lower() in ["open", "connected"]
+
+
+class GrpcData(ProtocolData):
+    """gRPC protocol-specific data container."""
+    
+    protocol_type: Literal["grpc"] = "grpc"
+    
+    # gRPC service information
+    service: str = Field(..., description="gRPC service name")
+    method: str = Field(..., description="gRPC method name")
+    
+    # gRPC messages
+    request_messages: List[Dict[str, Any]] = Field(default_factory=list, description="Request messages")
+    response_messages: List[Dict[str, Any]] = Field(default_factory=list, description="Response messages")
+    
+    # gRPC status
+    status_code: Optional[int] = Field(None, description="gRPC status code")
+    status_message: Optional[str] = Field(None, description="gRPC status message")
+    
+    # gRPC metadata
+    request_metadata: Dict[str, str] = Field(default_factory=dict, description="Request metadata")
+    response_metadata: Dict[str, str] = Field(default_factory=dict, description="Response metadata")
+    
+    # Streaming information
+    is_client_streaming: bool = Field(False, description="Whether client streams messages")
+    is_server_streaming: bool = Field(False, description="Whether server streams messages")
+    
+    @computed_field
+    @property
+    def is_streaming(self) -> bool:
+        """Check if this is a streaming RPC."""
+        return self.is_client_streaming or self.is_server_streaming
+    
+    @computed_field
+    @property
+    def is_success(self) -> bool:
+        """Check if gRPC call was successful."""
+        return self.status_code == 0 if self.status_code is not None else False
+
+
+class TcpData(ProtocolData):
+    """TCP protocol-specific data container."""
+    
+    protocol_type: Literal["tcp"] = "tcp"
+    
+    # TCP connection information
+    connection_established: bool = Field(False, description="Whether TCP connection was established")
+    connection_closed: bool = Field(False, description="Whether TCP connection was closed")
+    
+    # TCP flags and state
+    syn_sent: bool = Field(False, description="SYN packet sent")
+    syn_ack_received: bool = Field(False, description="SYN-ACK packet received")
+    fin_sent: bool = Field(False, description="FIN packet sent")
+    rst_sent: bool = Field(False, description="RST packet sent")
+    
+    # Data transfer
+    bytes_sent: int = Field(0, ge=0, description="Bytes sent")
+    bytes_received: int = Field(0, ge=0, description="Bytes received")
+    packets_sent: int = Field(0, ge=0, description="Packets sent")
+    packets_received: int = Field(0, ge=0, description="Packets received")
+    
+    # TCP-specific timing
+    handshake_duration_ms: Optional[float] = Field(None, ge=0, description="TCP handshake duration")
+    
+    @computed_field
+    @property
+    def total_bytes(self) -> int:
+        """Get total bytes transferred."""
+        return self.bytes_sent + self.bytes_received
+
+
+# Discriminated union for all protocol data types
+def get_protocol_discriminator(v: Any) -> str:
+    """Discriminator function for protocol data union."""
+    if isinstance(v, dict):
+        return v.get('protocol_type', 'unknown')
+    return getattr(v, 'protocol_type', 'unknown')
+
+
+ProtocolDataUnion = Union[
+    HttpData,
+    WebSocketData, 
+    GrpcData,
+    TcpData
+]
 
 
 class TLSInfo(BaseModel):
@@ -71,8 +241,18 @@ class TLSInfo(BaseModel):
         if not self.version:
             return False
         
-        # Check TLS version
-        if not self.version.is_secure:
+        # Check TLS version - handle both enum and string values
+        version_is_secure = False
+        if hasattr(self.version, 'is_secure'):
+            # TLSVersion enum
+            version_is_secure = self.version.is_secure
+        else:
+            # String value - check against known insecure versions
+            version_str = str(self.version).lower()
+            insecure_versions = ['ssl_2.0', 'ssl_3.0', 'tls_1.0', 'tls_1.1', 'sslv2', 'sslv3', 'tlsv1.0', 'tlsv1.1']
+            version_is_secure = version_str not in insecure_versions
+        
+        if not version_is_secure:
             return False
         
         # Check for known vulnerabilities
@@ -425,11 +605,16 @@ class NetworkTrace(BaseModel):
     Complete network trace containing all hops and analysis.
     
     Enhanced version with better aggregation and risk assessment.
+    Now supports extensible protocol-specific data.
     """
     
     # Basic trace information
     trace_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique trace identifier")
     session_id: Optional[str] = Field(None, description="Associated session identifier")
+    
+    # Protocol information
+    protocol: NetworkProtocol = Field(NetworkProtocol.HTTP, description="Network protocol used")
+    protocol_data: Optional[ProtocolDataUnion] = Field(None, description="Protocol-specific data")
     
     # Hops and routing
     hops: List[NetworkHop] = Field(default_factory=list, description="Network hops in order")
@@ -543,6 +728,59 @@ class NetworkTrace(BaseModel):
             rows.append(row)
         
         return rows
+    
+    # ============================================================================
+    # PROTOCOL-AWARE ACCESS METHODS
+    # ============================================================================
+    
+    @property
+    def http_data(self) -> Optional[HttpData]:
+        """Get HTTP data if this is an HTTP trace."""
+        if isinstance(self.protocol_data, HttpData):
+            return self.protocol_data
+        return None
+    
+    @property
+    def websocket_data(self) -> Optional[WebSocketData]:
+        """Get WebSocket data if this is a WebSocket trace."""
+        if isinstance(self.protocol_data, WebSocketData):
+            return self.protocol_data
+        return None
+    
+    @property
+    def grpc_data(self) -> Optional[GrpcData]:
+        """Get gRPC data if this is a gRPC trace."""
+        if isinstance(self.protocol_data, GrpcData):
+            return self.protocol_data
+        return None
+    
+    @property
+    def tcp_data(self) -> Optional[TcpData]:
+        """Get TCP data if this is a TCP trace."""
+        if isinstance(self.protocol_data, TcpData):
+            return self.protocol_data
+        return None
+    
+    # Protocol type guards
+    def is_http(self) -> bool:
+        """Type guard for HTTP traces."""
+        return isinstance(self.protocol_data, HttpData)
+    
+    def is_websocket(self) -> bool:
+        """Type guard for WebSocket traces."""
+        return isinstance(self.protocol_data, WebSocketData)
+    
+    def is_grpc(self) -> bool:
+        """Type guard for gRPC traces."""
+        return isinstance(self.protocol_data, GrpcData)
+    
+    def is_tcp(self) -> bool:
+        """Type guard for TCP traces."""
+        return isinstance(self.protocol_data, TcpData)
+    
+    def supports_protocol(self, protocol: NetworkProtocol) -> bool:
+        """Check if trace supports the specified protocol."""
+        return self.protocol == protocol
 
 
 class HttpRequest(BaseModel):
@@ -630,6 +868,101 @@ class TimingInfo(BaseModel):
         return self.ssl_handshake > 0
 
 
+class HttpTrace(NetworkTrace):
+    """
+    Network trace with HTTP request/response data.
+    
+    Extends NetworkTrace to include HTTP-specific information parsed from HAR files.
+    """
+    
+    # HTTP data fields
+    request: Optional[HttpRequest] = Field(None, description="HTTP request information")
+    response: Optional[HttpResponse] = Field(None, description="HTTP response information")
+    timing: Optional[TimingInfo] = Field(None, description="HTTP timing information")
+    
+    def __init__(self, **data):
+        """Initialize HttpTrace, extracting HTTP data from metadata if needed."""
+        # If HTTP data is provided in metadata, extract it to fields
+        metadata = data.get('metadata', {})
+        
+        # Extract HTTP request from metadata
+        if not data.get('request') and 'http_request' in metadata:
+            http_request_data = metadata['http_request']
+            try:
+                data['request'] = HttpRequest(**http_request_data)
+            except Exception:
+                pass
+        
+        # Extract HTTP response from metadata
+        if not data.get('response') and 'http_response' in metadata:
+            http_response_data = metadata['http_response']
+            try:
+                data['response'] = HttpResponse(**http_response_data)
+            except Exception:
+                pass
+        
+        # Extract timing from metadata
+        if not data.get('timing') and 'http_timing' in metadata:
+            http_timing_data = metadata['http_timing']
+            try:
+                data['timing'] = TimingInfo(**http_timing_data)
+            except Exception:
+                pass
+        
+        super().__init__(**data)
+    
+    @computed_field
+    @property
+    def has_http_data(self) -> bool:
+        """Check if trace has HTTP request/response data."""
+        return self.request is not None or self.response is not None
+    
+    @computed_field
+    @property
+    def is_http_success(self) -> bool:
+        """Check if HTTP response indicates success."""
+        return self.response.is_success if self.response else False
+    
+    @computed_field
+    @property
+    def http_status_code(self) -> int:
+        """Get HTTP status code."""
+        return self.response.status_code if self.response else 0
+    
+    @computed_field
+    @property
+    def response_time_ms(self) -> Optional[float]:
+        """Get response time in milliseconds."""
+        return self.timing.total_time if self.timing else None
+    
+    @computed_field
+    @property
+    def timestamp(self) -> Optional[datetime]:
+        """Get request timestamp."""
+        return self.request.timestamp if self.request else None
+    
+    def get_http_summary(self) -> Dict[str, Any]:
+        """Get HTTP-specific trace summary."""
+        summary = self.get_trace_summary()
+        summary.update({
+            'has_http_data': self.has_http_data,
+            'request_method': self.request.method if self.request else None,
+            'request_url': self.request.url if self.request else None,
+            'response_status': self.response.status_code if self.response else None,
+            'response_success': self.is_http_success,
+            'total_time_ms': self.timing.total_time if self.timing else None,
+        })
+        return summary
+
+
+# Rebuild models to resolve forward references
+HttpData.model_rebuild()
+WebSocketData.model_rebuild()
+GrpcData.model_rebuild()
+TcpData.model_rebuild()
+NetworkTrace.model_rebuild()
+HttpTrace.model_rebuild()
+
 # Export all models
 __all__ = [
     'TLSInfo',
@@ -638,7 +971,14 @@ __all__ = [
     'GeographicInfo',
     'NetworkHop',
     'NetworkTrace',
+    'HttpTrace',
     'HttpRequest',
     'HttpResponse',
     'TimingInfo',
+    'ProtocolData',
+    'HttpData',
+    'WebSocketData',
+    'GrpcData',
+    'TcpData',
+    'ProtocolDataUnion',
 ]

@@ -7,9 +7,17 @@ TLS fingerprinting, proxy detection, browser automation signatures, and network 
 
 from .base import IDetector, BaseDetector
 from .registry import DetectorRegistry
+from .tls import TlsDetector
+from .proxy import ProxyDetector
+from .browser import BrowserDetector
+from .network import NetworkDetector
 
 __all__ = [
     'IDetector',
     'BaseDetector', 
     'DetectorRegistry',
+    'TlsDetector',
+    'ProxyDetector',
+    'BrowserDetector',
+    'NetworkDetector',
 ]

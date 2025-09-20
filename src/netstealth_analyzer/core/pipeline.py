@@ -393,6 +393,10 @@ class PipelineEngine(IComponent):
             
             # Check that all stages are valid components
             for stage in self._stages.values():
+                if not hasattr(stage.component, '__class__'):
+                    return False
+                
+                # Check that component has required metadata attribute
                 if not hasattr(stage.component, 'metadata'):
                     return False
             
@@ -415,8 +419,14 @@ class PipelineEngine(IComponent):
         result = []
         
         while queue:
-            # Sort by priority for deterministic ordering
-            queue.sort(key=lambda name: self._stages[name].component.metadata.priority.value, reverse=True)
+            # Sort by priority for deterministic ordering (with fallback for components without metadata)
+            def get_priority(name):
+                component = self._stages[name].component
+                if hasattr(component, 'metadata') and hasattr(component.metadata, 'priority'):
+                    return component.metadata.priority.value
+                return 50  # Default priority
+            
+            queue.sort(key=get_priority, reverse=True)
             current = queue.pop(0)
             result.append(current)
             
@@ -858,15 +868,43 @@ class PipelineEngine(IComponent):
         """Call a stage component with appropriate method."""
         # Try different component interfaces
         if hasattr(component, 'parse') and callable(component.parse):
-            # Parser component
+            # Parser component - call with file path and context
             file_path = context.file_path if context else None
-            if file_path:
+            if file_path and context:
                 return await component.parse(file_path, context)
+            elif file_path:
+                return await component.parse(file_path)
         
         elif hasattr(component, 'detect') and callable(component.detect):
-            # Detector component
-            log_entries = input_data.get('log_entries', [])
-            return await component.detect(log_entries, context)
+            # Detector component - extract log entries and call with context
+            log_entries = []
+            
+            # Extract log entries from input data
+            if 'log_entries' in input_data:
+                log_entries = input_data['log_entries']
+            elif isinstance(input_data, list):
+                log_entries = input_data
+            else:
+                # Look for log entries in nested data
+                for key, value in input_data.items():
+                    if key == 'log_entries' and isinstance(value, list):
+                        log_entries = value
+                        break
+                    elif isinstance(value, dict) and 'log_entries' in value:
+                        log_entries = value['log_entries']
+                        break
+            
+            if context:
+                return await component.detect(log_entries, context)
+            else:
+                # Fallback to DetectionContext for backward compatibility
+                from ..detectors.base import DetectionContext
+                detection_context = DetectionContext(
+                    network_traces=[],
+                    service_domains=[],
+                    confidence_threshold=0.7
+                )
+                return await component.detect(detection_context)
         
         elif hasattr(component, 'generate_report') and callable(component.generate_report):
             # Reporter component

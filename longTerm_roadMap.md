@@ -58,6 +58,46 @@ Lower Score = Higher Priority
 | **Security Header Analysis** | 🟢 Low (1) | Critical (1) | **2** | `detectors/config_analyzer.py` |
 | **CORS Policy Analysis** | 🟢 Low (1) | Critical (1) | **2** | `detectors/cors_detector.py` |
 
+##### **🔑 API Key Leakage Detection - Critical Foundation** 
+**Vulnerability Need:** Streaming services like Tidal expose API keys that control access to their entire music catalog and user data.
+**Real-World Impact:** 
+- ⚠️ **Immediate Risk**: Exposed API keys enable unauthorized bulk downloading of entire music catalogs
+- 🔓 **Data Breach**: Access to millions of users' personal data and listening history
+- 💰 **Financial Impact**: Ability to create rogue applications that bypass payment systems
+- 🏗️ **Infrastructure Risk**: Single exposed key can compromise millions of tracks
+
+**Why Phase 1 Critical:** API keys are the "master keys" to streaming platforms - detecting their exposure provides immediate security value with minimal implementation complexity.
+
+##### **🛡️ Security Header Analysis - Essential Defense**
+**Vulnerability Need:** Streaming services serve content through web browsers which rely on security headers for protection.
+**Real-World Impact:**
+- 🎯 **Clickjacking**: Missing `X-Frame-Options` enables credential theft through UI redressing
+- ⚡ **XSS Attacks**: Absent `Content-Security-Policy` allows session hijacking through code injection
+- 🕳️ **MITM Attacks**: Missing security headers enable interception of unencrypted content streams
+- 🔒 **Session Compromise**: Weak security controls enable cascading authentication attacks
+
+**Why Phase 1 Critical:** Security headers are basic protective controls - their absence enables multiple attack vectors simultaneously.
+
+##### **🌐 CORS Policy Analysis - Access Control Foundation**
+**Vulnerability Need:** Streaming web players make cross-origin requests to various APIs and CDNs.
+**Real-World Impact:**
+- 🌍 **Cross-Origin Abuse**: Overly permissive CORS allows malicious websites to access streaming APIs
+- 🔐 **Credential Theft**: Bypass of Same-Origin Policy leads to authentication token extraction
+- 🎵 **Content Piracy**: CORS misconfigurations enable unauthorized access to premium audio streams
+- 📊 **Data Harvesting**: Malicious sites can extract user preferences and listening data
+
+**Why Phase 1 Critical:** CORS acts as the gatekeeper for browser-based API access - its misconfiguration has immediate exploitability.
+
+##### **⚙️ YAML Template System - Agility Enabler**
+**Strategic Need:** Streaming services constantly evolve their security measures and API structures.
+**Development Impact:**
+- 🚀 **Speed**: Reduce detector development time from days to hours
+- 👥 **Community**: Enable security researchers to contribute without deep coding knowledge
+- 📋 **Standardization**: Create consistent vulnerability detection patterns across services
+- 🔄 **Adaptability**: Rapid response to streaming service updates and new attack patterns
+
+**Why Phase 1 Critical:** Without rapid development capabilities, the tool becomes obsolete as streaming services evolve their defenses.
+
 **Architecture Changes:**
 ```python
 # New: src/netstealth_analyzer/detectors/streaming_security.py
@@ -173,6 +213,46 @@ class BrowserDetector(BaseDetector):
 | **JWT Token Analysis** | 🟡 Medium (3) | Critical (1) | **4** | Tidal OAuth tokens |
 | **OAuth Flow Detection** | 🟡 Medium (3) | Critical (1) | **4** | Tidal login vulnerabilities |
 | **Session Fixation Detection** | 🟡 Medium (3) | High (2) | **5** | Tidal session hijacking |
+
+##### **🔐 JWT Token Analysis - Authentication Core**
+**Vulnerability Need:** Streaming services like Tidal rely heavily on JWT tokens for cross-platform authentication and API access control.
+**Real-World Impact:**
+- 🎯 **Account Takeover**: Weak signing algorithms (HS256 with guessable secrets) enable token forgery
+- ⬆️ **Privilege Escalation**: Token claims manipulation can upgrade free accounts to premium
+- 🔄 **Persistent Access**: Missing expiration validation allows indefinite unauthorized access
+- 🔓 **Cross-Device Compromise**: Single compromised token grants access across all user devices
+
+**Why Phase 2 Critical:** JWT vulnerabilities are the #1 authentication bypass vector in modern streaming APIs - detecting them is essential for comprehensive security assessment.
+
+##### **🔄 OAuth Flow Detection - Third-Party Security**
+**Vulnerability Need:** Tidal implements OAuth for integrations with DJ software, smart speakers, and third-party music apps.
+**Real-World Impact:**
+- 🕵️ **Authorization Hijacking**: Interception of authorization codes during OAuth dance
+- 🔁 **Token Replay Attacks**: Reuse of captured authorization tokens across sessions
+- 🌐 **Redirect Manipulation**: Malicious redirect URIs that steal authorization codes
+- 📱 **App Impersonation**: Unauthorized apps gaining access through OAuth vulnerabilities
+
+**Why Phase 2 Critical:** OAuth misconfigurations are subtle but devastating - they enable silent compromise of user accounts through legitimate-looking third-party integrations.
+
+##### **🎵 Content Access Pattern Detector - Piracy Prevention**
+**Vulnerability Need:** Distinguish between legitimate streaming and systematic content harvesting that violates terms of service.
+**Real-World Impact:**
+- 🎧 **Mass Audio Piracy**: Bulk downloading of HiFi/Master quality tracks for redistribution
+- 📊 **Metadata Scraping**: Systematic extraction of artist, album, and track data for competing services
+- ⚖️ **License Violations**: Detection of usage patterns that breach content licensing agreements
+- 🏢 **Commercial Abuse**: Identification of business-scale content extraction operations
+
+**Why Phase 2 Critical:** This capability differentiates security research from malicious piracy - essential for responsible vulnerability disclosure and legal compliance.
+
+##### **⚡ Rate Limit Bypass Detection - API Protection**
+**Vulnerability Need:** Streaming services implement rate limits to prevent API abuse and ensure fair resource usage.
+**Real-World Impact:**
+- 🧠 **Header Manipulation**: Techniques to reset rate limit counters through header modification
+- 🌍 **Distributed Bypass**: IP rotation and distributed request patterns to circumvent limits
+- 🚫 **DoS Prevention**: Identify methods that could lead to service degradation
+- 💰 **Economic Impact**: Detection of techniques that bypass subscription tier limitations
+
+**Why Phase 2 Critical:** Rate limits are often the primary protection against automated attacks - understanding their weaknesses is crucial for comprehensive security testing.
 
 **New Architecture Components:**
 ```python

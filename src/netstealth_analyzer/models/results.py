@@ -382,18 +382,56 @@ class AnalysisSummary(BaseModel):
         # Start with perfect score
         score = 100
         
-        # Deduct points for issues
-        score -= self.critical_issues_count * 20
-        score -= self.high_issues_count * 10
-        score -= self.medium_issues_count * 5
-        score -= self.low_issues_count * 2
-        score -= self.info_issues_count * 1
+        # Deduct points for issues (more reasonable for high-risk sessions)
+        score -= self.critical_issues_count * 3  # Reduced from 20 to 3
+        score -= self.high_issues_count * 2      # Reduced from 10 to 2
+        score -= self.medium_issues_count * 1    # Reduced from 5 to 1
+        score -= self.low_issues_count * 0.5     # Reduced from 2 to 0.5
+        score -= self.info_issues_count * 0.1    # Reduced from 1 to 0.1
         
         # Add points for successful functional indicators
         score += self.success_indicators_count * 5
         
         # Ensure score is within bounds
-        self.overall_score = max(0, min(100, score))
+        self.overall_score = max(0, min(100, int(score)))
+        
+        # Calculate risk level based on score and issue severity
+        self._calculate_risk_level()
+    
+    def _calculate_risk_level(self) -> None:
+        """Calculate overall risk level based on issues and score."""
+        # If we have critical issues, risk is critical
+        if self.critical_issues_count > 0:
+            self.overall_risk_level = "critical"
+            self.risk_score = 0.9
+        # If we have multiple high issues or score is very low, risk is high
+        elif self.high_issues_count >= 3 or self.overall_score <= 20:
+            self.overall_risk_level = "high"
+            self.risk_score = 0.7
+        # If we have high issues or score is low, risk is high
+        elif self.high_issues_count > 0 or self.overall_score <= 40:
+            self.overall_risk_level = "high"
+            self.risk_score = 0.6
+        # If we have multiple medium issues or score is medium-low, risk is medium
+        elif self.medium_issues_count >= 5 or self.overall_score <= 60:
+            self.overall_risk_level = "medium"
+            self.risk_score = 0.4
+        # If we have medium issues or score is medium, risk is medium
+        elif self.medium_issues_count > 0 or self.overall_score <= 80:
+            self.overall_risk_level = "medium"
+            self.risk_score = 0.3
+        # If we have low issues, risk is low
+        elif self.low_issues_count > 0:
+            self.overall_risk_level = "low"
+            self.risk_score = 0.2
+        # If score is perfect or near perfect, risk is safe
+        elif self.overall_score >= 95:
+            self.overall_risk_level = "safe"
+            self.risk_score = 0.1
+        # Default case
+        else:
+            self.overall_risk_level = "low"
+            self.risk_score = 0.2
     
     def get_severity_distribution(self) -> Dict[str, float]:
         """Get percentage distribution of issues by severity."""
