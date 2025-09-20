@@ -229,6 +229,17 @@ class IDetector(ABC):
         # Convert DetectionConfidence enum to float if needed
         confidence_value = confidence.numeric_value if hasattr(confidence, 'numeric_value') else float(confidence)
         
+        # Separate rule_id from other metadata
+        raw_data = {}
+        issue_metadata = {'detection_method': self.name}
+        
+        if metadata:
+            # Extract rule_id for raw_data, keep other metadata
+            rule_id = metadata.pop('rule_id', None)
+            if rule_id:
+                raw_data['rule_id'] = rule_id
+            issue_metadata.update(metadata)
+        
         return Issue(
             id=str(uuid4()),
             title=title,
@@ -240,7 +251,8 @@ class IDetector(ABC):
             evidence=evidence,
             detection_timestamp=datetime.now(timezone.utc),
             remediation_suggestions=remediation_objects,
-            metadata={'detection_method': self.name, **(metadata or {})}
+            metadata=issue_metadata,
+            raw_data=raw_data
         )
     
     def _create_evidence(
@@ -465,6 +477,20 @@ class BaseDetector(IDetector):
             if hasattr(trace, 'http_data') and trace.http_data and hasattr(trace.http_data, 'request'):
                 return trace.http_data.request
         
+        # Fallback to metadata-based request data
+        if hasattr(trace, 'metadata') and trace.metadata:
+            http_request = trace.metadata.get('http_request')
+            if http_request:
+                # Create a simple object to mimic request structure
+                class MetadataRequest:
+                    def __init__(self, data):
+                        self.url = data.get('url', '')
+                        self.method = data.get('method', 'GET')
+                        self.headers = data.get('headers', [])
+                        self.body = data.get('body')
+                
+                return MetadataRequest(http_request)
+        
         return None
     
     def _get_response_data(self, trace: NetworkTrace):
@@ -485,6 +511,19 @@ class BaseDetector(IDetector):
         if hasattr(trace, 'is_http') and callable(trace.is_http) and trace.is_http():
             if hasattr(trace, 'http_data') and trace.http_data and hasattr(trace.http_data, 'response'):
                 return trace.http_data.response
+        
+        # Fallback to metadata-based response data
+        if hasattr(trace, 'metadata') and trace.metadata:
+            http_response = trace.metadata.get('http_response')
+            if http_response:
+                # Create a simple object to mimic response structure
+                class MetadataResponse:
+                    def __init__(self, data):
+                        self.status_code = data.get('status_code', 200)
+                        self.headers = data.get('headers', [])
+                        self.body = data.get('body')
+                
+                return MetadataResponse(http_response)
         
         return None
     

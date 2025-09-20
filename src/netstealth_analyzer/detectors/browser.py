@@ -192,11 +192,8 @@ class BrowserDetector(BaseDetector):
                     
                     # Track rules applied
                     for issue in trace_issues:
-                        # Handle both dict and IssueMetadata object
-                        if hasattr(issue.metadata, 'get'):
-                            rule_id = issue.metadata.get('rule_id')
-                        else:
-                            rule_id = getattr(issue.metadata, 'rule_id', None)
+                        # Look for rule_id in raw_data field
+                        rule_id = issue.raw_data.get('rule_id') if issue.raw_data else None
                         
                         if rule_id and rule_id not in [r.id for r in rules_applied]:
                             rule = next((r for r in self._detection_rules if r.id == rule_id), None)
@@ -607,7 +604,7 @@ class BrowserDetector(BaseDetector):
             description="User agent has unusual characteristics that may indicate automation",
             category=IssueCategory.BROWSER_AUTOMATION,
             severity=SeverityLevel.HIGH,
-            confidence=DetectionConfidence.MEDIUM,
+            confidence=DetectionConfidence.HIGH,
             evidence=evidence,
             metadata={
                 "rule_id": "suspicious_user_agent",

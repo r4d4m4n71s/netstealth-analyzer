@@ -185,7 +185,7 @@ class NetworkDetector(BaseDetector):
                     
                     # Emit progress every 100 traces
                     if (trace_idx + 1) % 100 == 0:
-                        self._emit_progress("network_traces_processed", {
+                        await self._emit_progress("network_traces_processed", {
                             "processed": trace_idx + 1,
                             "total": len(context.network_traces),
                             "issues_found": len(issues)
