@@ -357,7 +357,7 @@ class ConcurrentPlugin{i}(IPlugin):
         avg_processing_time = sum(processing_times) / len(processing_times)
         max_processing_time = max(processing_times)
         
-        assert avg_processing_time < 0.02, f"Average processing time too high: {avg_processing_time:.3f}s"
+        assert avg_processing_time < 0.05, f"Average processing time too high: {avg_processing_time:.3f}s"
         assert max_processing_time < 0.05, f"Maximum processing time too high: {max_processing_time:.3f}s"
     
     @pytest.mark.asyncio

@@ -1,0 +1,938 @@
+"""
+Protocol Extensibility Integration Tests.
+
+This module contains integration tests that validate the extensible protocol
+architecture and its ability to handle custom protocols, mixed protocol
+sessions, and protocol parser chains.
+"""
+
+import pytest
+import json
+import tempfile
+import os
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
+from typing import Dict, List, Optional, Any
+
+from src.netstealth_analyzer.analyzer import NetStealthAnalyzer
+from src.netstealth_analyzer.builder import AnalyzerBuilder
+from src.netstealth_analyzer.config import NetStealthConfig, DetectorConfig, PerformanceConfig
+from src.netstealth_analyzer.models.enums import SeverityLevel, IssueCategory
+from src.netstealth_analyzer.models.network import NetworkTrace, NetworkHop, ProtocolData
+from src.netstealth_analyzer.models.issues import Issue, IssueEvidence
+from src.netstealth_analyzer.parsers.base import BaseLogParser
+from src.netstealth_analyzer.models.enums import LogFormat
+
+
+# Custom Protocol Data Models for Testing
+class CustomWebRTCData(ProtocolData):
+    """Custom WebRTC protocol data for testing extensibility."""
+    
+    def __init__(self, peer_connection_id: str, ice_candidates: List[str], 
+                 signaling_state: str, data_channels: List[Dict] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.peer_connection_id = peer_connection_id
+        self.ice_candidates = ice_candidates
+        self.signaling_state = signaling_state
+        self.data_channels = data_channels or []
+        self.stun_servers = kwargs.get('stun_servers', [])
+        self.turn_servers = kwargs.get('turn_servers', [])
+
+
+class CustomWebSocketData(ProtocolData):
+    """Custom WebSocket protocol data for testing extensibility."""
+    
+    def __init__(self, connection_id: str, url: str, subprotocols: List[str],
+                 messages: List[Dict] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.connection_id = connection_id
+        self.url = url
+        self.subprotocols = subprotocols
+        self.messages = messages or []
+        self.handshake_headers = kwargs.get('handshake_headers', {})
+        self.close_reason = kwargs.get('close_reason', None)
+
+
+# Custom Protocol Parsers for Testing
+class CustomWebRTCParser(BaseLogParser):
+    """Custom WebRTC protocol parser for testing extensibility."""
+    
+    @property
+    def supported_format(self) -> LogFormat:
+        return LogFormat.JSON
+    
+    @property
+    def file_extensions(self) -> List[str]:
+        return ['.json', '.webrtc']
+    
+    async def parse(self, file_path, **kwargs):
+        """Parse WebRTC log data into ParseResult."""
+        from src.netstealth_analyzer.parsers.base import ParseResult
+        
+        traces = []
+        errors = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+                if 'webrtc_sessions' in data:
+                    for session in data['webrtc_sessions']:
+                        trace = self._create_webrtc_trace(session)
+                        traces.append(trace)
+                        
+        except Exception as e:
+            errors.append({'error': str(e), 'context': 'webrtc_parsing'})
+        
+        return ParseResult(
+            format=LogFormat.JSON,
+            source_file=str(file_path),
+            metadata={'parser': 'webrtc', 'sessions': len(traces)},
+            network_traces=traces,
+            statistics={'parsed_sessions': len(traces)},
+            errors=errors
+        )
+    
+    async def stream_parse(self, file_path, **kwargs):
+        """Stream parse WebRTC data."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+                if 'webrtc_sessions' in data:
+                    for session in data['webrtc_sessions']:
+                        trace = self._create_webrtc_trace(session)
+                        yield trace
+        except Exception:
+            pass
+    
+    def _create_webrtc_trace(self, session_data: Dict) -> NetworkTrace:
+        """Create NetworkTrace with WebRTC protocol data."""
+        webrtc_data = CustomWebRTCData(
+            peer_connection_id=session_data.get('peer_connection_id', ''),
+            ice_candidates=session_data.get('ice_candidates', []),
+            signaling_state=session_data.get('signaling_state', 'stable'),
+            data_channels=session_data.get('data_channels', []),
+            stun_servers=session_data.get('stun_servers', []),
+            turn_servers=session_data.get('turn_servers', [])
+        )
+        
+        # Create network hops for WebRTC session
+        hops = []
+        for i, candidate in enumerate(session_data.get('ice_candidates', [])[:3]):
+            hop = NetworkHop(
+                hop_number=i + 1,
+                hop_id=f"webrtc-hop-{i}",
+                actor=f"webrtc_peer_{i}",
+                actor_name=f"WebRTC Peer {i}",
+                incoming_ip="127.0.0.1",
+                outgoing_ip=candidate.get('ip', '192.168.1.1'),
+                timestamp=float(session_data.get('timestamp', 0)) + i * 0.1
+            )
+            hops.append(hop)
+        
+        return NetworkTrace(
+            trace_id=f"webrtc-{session_data.get('peer_connection_id', 'unknown')}",
+            session_id=session_data.get('session_id', 'webrtc-session'),
+            protocol_data={'webrtc': webrtc_data},
+            hops=hops
+        )
+
+
+class CustomWebSocketParser(BaseLogParser):
+    """Custom WebSocket protocol parser for testing extensibility."""
+    
+    @property
+    def supported_format(self) -> LogFormat:
+        return LogFormat.JSON
+    
+    @property
+    def file_extensions(self) -> List[str]:
+        return ['.json', '.ws']
+    
+    async def parse(self, file_path, **kwargs):
+        """Parse WebSocket log data into ParseResult."""
+        from src.netstealth_analyzer.parsers.base import ParseResult
+        
+        traces = []
+        errors = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+                if 'websocket_connections' in data:
+                    for connection in data['websocket_connections']:
+                        trace = self._create_websocket_trace(connection)
+                        traces.append(trace)
+                        
+        except Exception as e:
+            errors.append({'error': str(e), 'context': 'websocket_parsing'})
+            
+        return ParseResult(
+            format=LogFormat.JSON,
+            source_file=str(file_path),
+            metadata={'parser': 'websocket', 'connections': len(traces)},
+            network_traces=traces,
+            statistics={'parsed_connections': len(traces)},
+            errors=errors
+        )
+    
+    async def stream_parse(self, file_path, **kwargs):
+        """Stream parse WebSocket data."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+                if 'websocket_connections' in data:
+                    for connection in data['websocket_connections']:
+                        trace = self._create_websocket_trace(connection)
+                        yield trace
+        except Exception:
+            pass
+    
+    def _create_websocket_trace(self, connection_data: Dict) -> NetworkTrace:
+        """Create NetworkTrace with WebSocket protocol data."""
+        ws_data = CustomWebSocketData(
+            connection_id=connection_data.get('connection_id', ''),
+            url=connection_data.get('url', ''),
+            subprotocols=connection_data.get('subprotocols', []),
+            messages=connection_data.get('messages', []),
+            handshake_headers=connection_data.get('handshake_headers', {}),
+            close_reason=connection_data.get('close_reason', None)
+        )
+        
+        # Create network hop for WebSocket connection
+        hop = NetworkHop(
+            hop_number=1,
+            hop_id=f"ws-hop-{connection_data.get('connection_id', 'unknown')}",
+            actor="websocket_client",
+            actor_name="WebSocket Client",
+            incoming_ip="127.0.0.1",
+            outgoing_ip=connection_data.get('server_ip', '192.168.1.100'),
+            timestamp=float(connection_data.get('timestamp', 0))
+        )
+        
+        return NetworkTrace(
+            trace_id=f"ws-{connection_data.get('connection_id', 'unknown')}",
+            session_id=connection_data.get('session_id', 'ws-session'),
+            protocol_data={'websocket': ws_data},
+            hops=[hop]
+        )
+
+
+def create_test_config(enable_streaming=False, max_concurrent_detectors=4):
+    """Create a NetStealthConfig for testing."""
+    return NetStealthConfig(
+        detectors=DetectorConfig(
+            confidence_threshold=0.5,
+            enabled_detectors=["network", "proxy", "browser"]
+        ),
+        performance=PerformanceConfig(
+            max_concurrent_detectors=max_concurrent_detectors,
+            enable_parallel_processing=not enable_streaming
+        )
+    )
+
+
+@pytest.mark.asyncio
+class TestProtocolExtensibilityIntegration:
+    """Test suite for protocol extensibility and custom protocol handling."""
+
+    async def test_custom_protocol_registration_and_parsing(self):
+        """Test registration and parsing of custom protocols."""
+        # Create test data with custom WebRTC protocol
+        webrtc_test_data = {
+            "webrtc_sessions": [
+                {
+                    "peer_connection_id": "pc-12345",
+                    "session_id": "webrtc-session-1",
+                    "signaling_state": "have-remote-offer",
+                    "ice_candidates": [
+                        {"ip": "192.168.1.10", "port": 12345, "type": "host"},
+                        {"ip": "203.0.113.45", "port": 54321, "type": "srflx"}
+                    ],
+                    "data_channels": [
+                        {"label": "data", "ordered": True}
+                    ],
+                    "stun_servers": ["stun:stun.example.com:3478"],
+                    "timestamp": 1704110400.0
+                }
+            ]
+        }
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(webrtc_test_data, f)
+            test_file_path = f.name
+
+        try:
+            # Create custom parser
+            webrtc_parser = CustomWebRTCParser()
+            
+            # Test parser parsing
+            result = await webrtc_parser.parse(Path(test_file_path))
+            
+            # Validate parsing results
+            assert result.is_successful, "Parser should succeed"
+            assert len(result.network_traces) == 1, "Should parse one WebRTC session"
+            
+            webrtc_trace = result.network_traces[0]
+            assert webrtc_trace.trace_id == "webrtc-pc-12345"
+            assert 'webrtc' in webrtc_trace.protocol_data
+            
+            # Validate custom protocol data
+            webrtc_data = webrtc_trace.protocol_data['webrtc']
+            assert isinstance(webrtc_data, CustomWebRTCData)
+            assert webrtc_data.peer_connection_id == "pc-12345"
+            assert webrtc_data.signaling_state == "have-remote-offer"
+            assert len(webrtc_data.ice_candidates) == 2
+            assert len(webrtc_data.stun_servers) == 1
+            
+            # Validate network hops created from protocol data
+            assert len(webrtc_trace.hops) == 2  # Created from ICE candidates
+            assert webrtc_trace.hops[0].outgoing_ip == "192.168.1.10"
+            assert webrtc_trace.hops[1].outgoing_ip == "203.0.113.45"
+            
+        finally:
+            os.unlink(test_file_path)
+
+    async def test_mixed_protocol_analysis_workflow(self):
+        """Test analysis workflow with mixed protocols in the same session."""
+        # Create mixed protocol test data
+        mixed_protocol_data = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "Mixed Protocol Test", "version": "1.0"},
+                "entries": [
+                    # Standard HTTP entry
+                    {
+                        "startedDateTime": "2025-01-01T10:00:00.000Z",
+                        "time": 100,
+                        "request": {
+                            "method": "GET",
+                            "url": "https://api.example.com/data",
+                            "httpVersion": "HTTP/1.1",
+                            "headers": [
+                                {"name": "User-Agent", "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                            ],
+                            "queryString": [],
+                            "cookies": [],
+                            "headersSize": 200,
+                            "bodySize": 0
+                        },
+                        "response": {
+                            "status": 200,
+                            "statusText": "OK",
+                            "httpVersion": "HTTP/1.1",
+                            "headers": [
+                                {"name": "Content-Type", "value": "application/json"}
+                            ],
+                            "cookies": [],
+                            "content": {
+                                "size": 150,
+                                "mimeType": "application/json",
+                                "text": '{"data": "response"}'
+                            },
+                            "redirectURL": "",
+                            "headersSize": 180,
+                            "bodySize": 150
+                        },
+                        "cache": {},
+                        "timings": {
+                            "blocked": 0,
+                            "dns": 10,
+                            "connect": 20,
+                            "send": 5,
+                            "wait": 50,
+                            "receive": 15,
+                            "ssl": 30
+                        }
+                    }
+                ]
+            },
+            "websocket_connections": [
+                {
+                    "connection_id": "ws-67890",
+                    "session_id": "mixed-session-1",
+                    "url": "wss://api.example.com/socket",
+                    "subprotocols": ["chat", "notifications"],
+                    "handshake_headers": {
+                        "Origin": "https://example.com",
+                        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ=="
+                    },
+                    "messages": [
+                        {"type": "message", "data": "Hello WebSocket", "timestamp": 1704110401.0}
+                    ],
+                    "server_ip": "203.0.113.100",
+                    "timestamp": 1704110400.5
+                }
+            ]
+        }
+
+        # Create temporary file for mixed protocol data
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(mixed_protocol_data, f)
+            mixed_file_path = f.name
+
+        try:
+            # Build analyzer configuration
+            config = create_test_config()
+            analyzer = AnalyzerBuilder().with_config(config).with_log(mixed_file_path).build()
+            
+            # Analyze mixed protocol data
+            result = await analyzer.analyze()
+            
+            # Validate mixed protocol analysis
+            assert result is not None
+            assert len(result.network_traces) >= 1  # At least HTTP traces should be parsed
+            
+            # Check for different protocol types in traces
+            protocol_types = set()
+            for trace in result.network_traces:
+                if hasattr(trace, 'protocol_data') and trace.protocol_data:
+                    protocol_types.update(trace.protocol_data.keys())
+                else:
+                    # Standard HTTP traces
+                    protocol_types.add('http')
+            
+            # Should have at least HTTP protocol
+            assert 'http' in protocol_types or len(result.network_traces) > 0
+            
+            # Validate analysis results
+            assert result.summary is not None
+            assert 0 <= result.summary.overall_score <= 100
+            
+        finally:
+            os.unlink(mixed_file_path)
+
+    async def test_custom_protocol_detection_and_issue_generation(self):
+        """Test custom protocol detection and issue generation."""
+        # Create test data with potentially problematic WebRTC configuration
+        problematic_webrtc_data = {
+            "webrtc_sessions": [
+                {
+                    "peer_connection_id": "insecure-pc-123",
+                    "session_id": "webrtc-insecure-session",
+                    "signaling_state": "stable",
+                    "ice_candidates": [
+                        {"ip": "0.0.0.0", "port": 80, "type": "host"},  # Potentially problematic
+                        {"ip": "127.0.0.1", "port": 443, "type": "host"}  # Localhost exposure
+                    ],
+                    "data_channels": [
+                        {"label": "unencrypted_data", "ordered": False}  # Potentially problematic
+                    ],
+                    "stun_servers": [],  # No STUN servers - potential privacy issue
+                    "turn_servers": [],  # No TURN servers
+                    "timestamp": 1704110400.0
+                }
+            ]
+        }
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(problematic_webrtc_data, f)
+            test_file_path = f.name
+
+        try:
+            # Create and test parser
+            webrtc_parser = CustomWebRTCParser()
+            result = await webrtc_parser.parse(Path(test_file_path))
+            
+            # Validate problematic data was parsed
+            assert len(result.network_traces) == 1
+            webrtc_trace = result.network_traces[0]
+            webrtc_data = webrtc_trace.protocol_data['webrtc']
+            
+            # Validate problematic configurations were captured
+            assert len(webrtc_data.stun_servers) == 0  # No STUN servers
+            assert len(webrtc_data.ice_candidates) == 2
+            assert any(candidate['ip'] == '0.0.0.0' for candidate in webrtc_data.ice_candidates)
+            assert any(candidate['ip'] == '127.0.0.1' for candidate in webrtc_data.ice_candidates)
+            
+            # Test with analyzer (even without custom detector, should not crash)
+            config = create_test_config()
+            analyzer = AnalyzerBuilder().with_config(config).with_log(test_file_path).build()
+            
+            result = await analyzer.analyze()
+            
+            # Analysis should complete without errors
+            assert result is not None
+            assert result.summary is not None
+            
+        finally:
+            os.unlink(test_file_path)
+
+    async def test_protocol_parser_chain_execution(self):
+        """Test execution of multiple protocol parsers in a chain."""
+        # Create data that could be parsed by multiple parsers
+        multi_parser_data = {
+            # Standard HAR format
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "Multi Parser Test", "version": "1.0"},
+                "entries": [
+                    {
+                        "startedDateTime": "2025-01-01T12:00:00.000Z",
+                        "time": 200,
+                        "request": {
+                            "method": "POST",
+                            "url": "https://chat.example.com/api/send",
+                            "httpVersion": "HTTP/2",
+                            "headers": [
+                                {"name": "Content-Type", "value": "application/json"},
+                                {"name": "Upgrade", "value": "websocket"}
+                            ],
+                            "postData": {
+                                "mimeType": "application/json",
+                                "text": '{"message": "Hello world"}'
+                            },
+                            "headersSize": 250,
+                            "bodySize": 50
+                        },
+                        "response": {
+                            "status": 101,
+                            "statusText": "Switching Protocols",
+                            "httpVersion": "HTTP/2",
+                            "headers": [
+                                {"name": "Upgrade", "value": "websocket"},
+                                {"name": "Connection", "value": "Upgrade"}
+                            ],
+                            "cookies": [],
+                            "content": {"size": 0, "mimeType": ""},
+                            "redirectURL": "",
+                            "headersSize": 150,
+                            "bodySize": 0
+                        },
+                        "timings": {
+                            "blocked": 5,
+                            "dns": 15,
+                            "connect": 30,
+                            "send": 10,
+                            "wait": 120,
+                            "receive": 20,
+                            "ssl": 40
+                        }
+                    }
+                ]
+            },
+            # Custom WebSocket data
+            "websocket_connections": [
+                {
+                    "connection_id": "upgraded-ws-123",
+                    "session_id": "multi-parser-session",
+                    "url": "wss://chat.example.com/socket",
+                    "subprotocols": ["chat"],
+                    "handshake_headers": {
+                        "Origin": "https://chat.example.com"
+                    },
+                    "messages": [
+                        {"type": "text", "data": "Upgraded connection message"}
+                    ],
+                    "timestamp": 1704113200.5
+                }
+            ]
+        }
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(multi_parser_data, f)
+            test_file_path = f.name
+
+        try:
+            # Test that both standard HAR and custom WebSocket parsing work
+            config = create_test_config()
+            analyzer = AnalyzerBuilder().with_config(config).with_log(test_file_path).build()
+            
+            # Analyze with multiple potential parsers
+            result = await analyzer.analyze()
+            
+            # Validate analysis results
+            assert result is not None
+            assert len(result.network_traces) >= 1  # Should parse at least HTTP traces
+            
+            # Check for protocol upgrade detection in the traces
+            upgrade_detected = False
+            for trace in result.network_traces:
+                if hasattr(trace, 'http_data') and trace.http_data:
+                    if hasattr(trace.http_data, 'response') and trace.http_data.response:
+                        if trace.http_data.response.status_code == 101:
+                            upgrade_detected = True
+                            break
+            
+            # Should detect protocol upgrade or at least parse the data
+            assert upgrade_detected or len(result.network_traces) > 0
+            
+        finally:
+            os.unlink(test_file_path)
+
+    async def test_protocol_data_access_patterns(self):
+        """Test different patterns for accessing protocol-specific data."""
+        # Create test data with multiple protocol layers
+        layered_protocol_data = {
+            "websocket_connections": [
+                {
+                    "connection_id": "layered-ws-456",
+                    "session_id": "layered-session",
+                    "url": "wss://secure.example.com/api",
+                    "subprotocols": ["v1.api", "auth"],
+                    "handshake_headers": {
+                        "Authorization": "Bearer token123",
+                        "X-Custom-Protocol": "LayeredAPI/1.0"
+                    },
+                    "messages": [
+                        {
+                            "type": "binary",
+                            "data": "encrypted_payload",
+                            "metadata": {
+                                "encryption": "AES-256-GCM",
+                                "compression": "gzip"
+                            }
+                        }
+                    ],
+                    "server_ip": "198.51.100.10",
+                    "timestamp": 1704110500.0
+                }
+            ]
+        }
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(layered_protocol_data, f)
+            test_file_path = f.name
+
+        try:
+            # Create and use custom WebSocket parser
+            ws_parser = CustomWebSocketParser()
+            result = await ws_parser.parse(Path(test_file_path))
+            
+            # Validate protocol data access patterns
+            assert len(result.network_traces) == 1
+            trace = result.network_traces[0]
+            
+            # Test direct protocol data access
+            assert 'websocket' in trace.protocol_data
+            ws_data = trace.protocol_data['websocket']
+            assert isinstance(ws_data, CustomWebSocketData)
+            
+            # Test nested data access
+            assert ws_data.connection_id == "layered-ws-456"
+            assert 'v1.api' in ws_data.subprotocols
+            assert 'Authorization' in ws_data.handshake_headers
+            
+            # Test message data access
+            assert len(ws_data.messages) == 1
+            message = ws_data.messages[0]
+            assert message['type'] == 'binary'
+            assert 'metadata' in message
+            assert message['metadata']['encryption'] == 'AES-256-GCM'
+            
+            # Test protocol-agnostic access patterns
+            assert trace.trace_id.startswith('ws-')
+            assert trace.session_id == 'layered-session'
+            assert len(trace.hops) == 1
+            assert trace.hops[0].outgoing_ip == "198.51.100.10"
+            
+        finally:
+            os.unlink(test_file_path)
+
+    async def test_custom_protocol_error_handling(self):
+        """Test error handling with malformed custom protocol data."""
+        # Create malformed protocol data
+        malformed_data = {
+            "webrtc_sessions": [
+                {
+                    # Missing required fields
+                    "signaling_state": "invalid-state",
+                    "ice_candidates": "not-a-list",  # Wrong type
+                    "malformed_field": {"nested": {"deeply": "problematic"}},
+                    # Missing timestamp, peer_connection_id, etc.
+                }
+            ],
+            "websocket_connections": [
+                {
+                    "connection_id": None,  # Invalid value
+                    "url": "not-a-valid-websocket-url",
+                    "subprotocols": {"wrong": "type"},  # Should be list
+                    # Missing required fields
+                }
+            ]
+        }
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(malformed_data, f)
+            test_file_path = f.name
+
+        try:
+            # Test WebRTC parser error handling
+            webrtc_parser = CustomWebRTCParser()
+            webrtc_result = await webrtc_parser.parse(Path(test_file_path))
+            
+            # Should handle errors gracefully and return what it can parse
+            # (Implementation may vary - could return empty list or partial data)
+            assert isinstance(webrtc_result.network_traces, list)
+            
+            # Test WebSocket parser error handling
+            ws_parser = CustomWebSocketParser()
+            ws_result = await ws_parser.parse(Path(test_file_path))
+            
+            # Should handle errors gracefully
+            assert isinstance(ws_result.network_traces, list)
+            
+            # Test analyzer resilience with malformed data
+            config = create_test_config()
+            analyzer = AnalyzerBuilder().with_config(config).with_log(test_file_path).build()
+            
+            # Analysis should not crash with malformed data
+            result = await analyzer.analyze()
+            
+            # Should return valid result even with problematic input
+            assert result is not None
+            assert result.summary is not None
+            assert 0 <= result.summary.overall_score <= 100
+            
+        finally:
+            os.unlink(test_file_path)
+
+    async def test_protocol_extensibility_performance(self):
+        """Test performance impact of protocol extensibility features."""
+        # Create large dataset with mixed protocols
+        large_mixed_data = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "Performance Test", "version": "1.0"},
+                "entries": []
+            },
+            "webrtc_sessions": [],
+            "websocket_connections": []
+        }
+
+        # Generate test data
+        for i in range(20):  # 20 of each type
+            # HTTP entries
+            large_mixed_data["log"]["entries"].append({
+                "startedDateTime": f"2025-01-01T{10 + i % 14:02d}:00:00.000Z",
+                "time": 100 + i * 10,
+                "request": {
+                    "method": "GET",
+                    "url": f"https://api{i}.example.com/data",
+                    "httpVersion": "HTTP/1.1",
+                    "headers": [{"name": "User-Agent", "value": f"TestClient-{i}"}],
+                    "queryString": [],
+                    "cookies": [],
+                    "headersSize": 200,
+                    "bodySize": 0
+                },
+                "response": {
+                    "status": 200,
+                    "statusText": "OK",
+                    "httpVersion": "HTTP/1.1",
+                    "headers": [{"name": "Content-Type", "value": "application/json"}],
+                    "cookies": [],
+                    "content": {"size": 150, "mimeType": "application/json"},
+                    "headersSize": 180,
+                    "bodySize": 150
+                },
+                "timings": {"blocked": 0, "dns": 10, "connect": 20, "send": 5, "wait": 50, "receive": 15}
+            })
+            
+            # WebRTC sessions
+            large_mixed_data["webrtc_sessions"].append({
+                "peer_connection_id": f"perf-pc-{i}",
+                "session_id": f"perf-webrtc-{i}",
+                "signaling_state": "stable",
+                "ice_candidates": [
+                    {"ip": f"192.168.{i % 256}.{(i * 2) % 256}", "port": 10000 + i, "type": "host"}
+                ],
+                "timestamp": 1704110400.0 + i * 10
+            })
+            
+            # WebSocket connections  
+            large_mixed_data["websocket_connections"].append({
+                "connection_id": f"perf-ws-{i}",
+                "session_id": f"perf-ws-session-{i}",
+                "url": f"wss://ws{i}.example.com/socket",
+                "subprotocols": [f"protocol-{i}"],
+                "messages": [{"type": "message", "data": f"Performance test message {i}"}],
+                "timestamp": 1704110400.0 + i * 5
+            })
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(large_mixed_data, f)
+            test_file_path = f.name
+
+        try:
+            import time
+            start_time = time.time()
+            
+            # Test performance with large mixed protocol dataset
+            config = create_test_config()
+            analyzer = AnalyzerBuilder().with_config(config).with_log(test_file_path).build()
+            
+            # Analyze large mixed protocol dataset
+            result = await analyzer.analyze()
+            
+            end_time = time.time()
+            analysis_time = end_time - start_time
+            
+            # Validate performance results
+            assert result is not None
+            assert len(result.network_traces) >= 20  # Should parse at least HTTP traces
+            
+            # Performance should be reasonable for mixed protocol analysis
+            assert analysis_time < 30.0, f"Analysis took too long: {analysis_time:.2f}s"
+            
+            # Validate analysis completed successfully
+            assert result.summary is not None
+            assert 0 <= result.summary.overall_score <= 100
+            
+            # Log performance metrics for monitoring
+            print(f"Large mixed protocol analysis completed in {analysis_time:.2f}s")
+            print(f"Processed {len(result.network_traces)} traces")
+            
+        finally:
+            os.unlink(test_file_path)
+
+    async def test_protocol_registry_patterns(self):
+        """Test protocol registry and discovery patterns."""
+        # This test validates that the system can handle dynamic protocol registration
+        webrtc_parser = CustomWebRTCParser()
+        ws_parser = CustomWebSocketParser()
+        
+        # Validate parser properties
+        assert webrtc_parser.supported_format == LogFormat.JSON
+        assert '.json' in webrtc_parser.file_extensions
+        assert '.webrtc' in webrtc_parser.file_extensions
+        
+        assert ws_parser.supported_format == LogFormat.JSON
+        assert '.json' in ws_parser.file_extensions
+        assert '.ws' in ws_parser.file_extensions
+        
+        # Test that parsers have distinct file extension patterns
+        assert '.webrtc' in webrtc_parser.file_extensions
+        assert '.webrtc' not in ws_parser.file_extensions
+        assert '.ws' in ws_parser.file_extensions
+        assert '.ws' not in webrtc_parser.file_extensions
+        
+        # Both should support JSON format
+        assert webrtc_parser.supported_format == LogFormat.JSON
+        assert ws_parser.supported_format == LogFormat.JSON
+
+    async def test_protocol_backward_compatibility(self):
+        """Test that new protocol extensions don't break existing functionality."""
+        # Create standard HAR data
+        standard_har_data = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "Standard Test", "version": "1.0"},
+                "entries": [
+                    {
+                        "startedDateTime": "2025-01-01T15:00:00.000Z",
+                        "time": 150,
+                        "request": {
+                            "method": "GET",
+                            "url": "https://example.com/api/test",
+                            "httpVersion": "HTTP/1.1",
+                            "headers": [
+                                {"name": "Accept", "value": "application/json"}
+                            ],
+                            "queryString": [],
+                            "cookies": [],
+                            "headersSize": 150,
+                            "bodySize": 0
+                        },
+                        "response": {
+                            "status": 200,
+                            "statusText": "OK",
+                            "httpVersion": "HTTP/1.1",
+                            "headers": [
+                                {"name": "Content-Type", "value": "application/json"}
+                            ],
+                            "cookies": [],
+                            "content": {
+                                "size": 100,
+                                "mimeType": "application/json"
+                            },
+                            "headersSize": 120,
+                            "bodySize": 100
+                        },
+                        "timings": {
+                            "blocked": 1,
+                            "dns": 5,
+                            "connect": 15,
+                            "send": 2,
+                            "wait": 100,
+                            "receive": 27
+                        }
+                    }
+                ]
+            }
+        }
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(standard_har_data, f)
+            test_file_path = f.name
+
+        try:
+            # Test that standard analysis still works with protocol extensibility framework
+            config = create_test_config()
+            analyzer = AnalyzerBuilder().with_config(config).with_log(test_file_path).build()
+            
+            result = await analyzer.analyze()
+            
+            # Standard HAR analysis should work normally
+            assert result is not None
+            assert len(result.network_traces) >= 1
+            assert result.summary is not None
+            assert 0 <= result.summary.overall_score <= 100
+            
+            # Should have standard HTTP trace data
+            http_trace_found = False
+            for trace in result.network_traces:
+                if hasattr(trace, 'http_data') and trace.http_data:
+                    http_trace_found = True
+                    break
+            
+            # Should find at least one HTTP trace or have valid traces
+            assert http_trace_found or len(result.network_traces) > 0
+            
+        finally:
+            os.unlink(test_file_path)
+
+
+if __name__ == "__main__":
+    # Example usage for manual testing
+    import asyncio
+    
+    async def main():
+        print("=== Protocol Extensibility Integration Tests ===")
+        
+        # Create test instance
+        test_suite = TestProtocolExtensibilityIntegration()
+        
+        try:
+            print("Testing custom protocol parsing...")
+            await test_suite.test_custom_protocol_registration_and_parsing()
+            print("✅ Custom protocol parsing test passed")
+            
+            print("Testing mixed protocol analysis...")
+            await test_suite.test_mixed_protocol_analysis_workflow()
+            print("✅ Mixed protocol analysis test passed")
+            
+            print("Testing protocol data access patterns...")
+            await test_suite.test_protocol_data_access_patterns()
+            print("✅ Protocol data access patterns test passed")
+            
+            print("Testing error handling...")
+            await test_suite.test_custom_protocol_error_handling()
+            print("✅ Error handling test passed")
+            
+            print("All protocol extensibility tests completed successfully!")
+            
+        except Exception as e:
+            print(f"❌ Test failed: {e}")
+    
+    asyncio.run(main())

@@ -1,8 +1,8 @@
 # 🛡️ NetStealth Analyzer v2.0
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-96%2F96%20passing-brightgreen.svg)](https://github.com/r4d4m4n71s/netstealth-analyzer)
-[![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen.svg)](https://github.com/r4d4m4n71s/netstealth-analyzer)
+[![Tests](https://img.shields.io/badge/tests-1353%2F1357%20passing-brightgreen.svg)](https://github.com/r4d4m4n71s/netstealth-analyzer)
+[![Coverage](https://img.shields.io/badge/coverage-82%25-brightgreen.svg)](https://github.com/r4d4m4n71s/netstealth-analyzer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Advanced Network Stealth Analysis & Proxy Detection Framework**
@@ -13,7 +13,7 @@ NetStealth Analyzer is a production-ready, async-first framework for comprehensi
 
 - **🔍 Comprehensive Detection**: Proxy leaks, browser automation, network anomalies, TLS issues
 - **⚡ High Performance**: Async-first architecture with streaming support for large files
-- **🎯 Production Ready**: 95% test coverage, 96/96 tests passing, battle-tested
+- **🎯 Production Ready**: 82% test coverage, 1,353/1,357 tests passing, battle-tested
 - **🔧 Easy to Use**: Intuitive fluent API with extensive documentation and examples
 - **🚀 Modern Tech Stack**: Python 3.13+, asyncio, Pydantic v2, plugin architecture
 - **📊 Rich Reporting**: HTML, JSON, Markdown, YAML reports with actionable insights
@@ -41,8 +41,8 @@ NetStealth Analyzer is a production-ready, async-first framework for comprehensi
 ## 📊 Current Status
 
 - **Project Completion**: 95%
-- **Test Coverage**: 95% overall, 99% core components
-- **Test Results**: 96/96 major component tests passing (100%)
+- **Test Coverage**: 82% overall (exceeds 80% target), 90%+ core detectors
+- **Test Results**: 1,353/1,357 tests passing (99.7% pass rate)
 - **Python Version**: 3.13.7 compatible
 - **Architecture**: Production-ready
 
@@ -227,8 +227,8 @@ poetry run pytest tests/unit/test_detectors_proxy.py -v
 | **Overall** | **96/96** | **95%** | ✅ |
 
 ### **Production Readiness**
-- ✅ **95% Test Coverage** across all components
-- ✅ **100% Test Success Rate** (96/96 tests passing)
+- ✅ **82% Test Coverage** across all components (exceeds 80% target)
+- ✅ **99.7% Test Success Rate** (1,353/1,357 tests passing)
 - ✅ **Python 3.13 Compatible** with modern async patterns
 - ✅ **Comprehensive Error Handling** with graceful degradation
 - ✅ **Memory Efficient** streaming for large file processing
@@ -392,7 +392,7 @@ poetry run mypy src/
 - ✅ **Data Processing**: Multi-format parsers with streaming support
 - ✅ **Reporting System**: Multiple output formats with rich HTML reports
 - ✅ **Documentation**: Comprehensive guides and examples
-- ✅ **Testing**: 95% coverage with 96/96 tests passing
+- ✅ **Testing**: 82% coverage with 1,353/1,357 tests passing (99.7% pass rate)
 - ✅ **Performance**: Memory-efficient processing of large files
 
 ### **Upcoming Features (v2.1.0) 🚧**
